@@ -36,7 +36,7 @@ def import_linux_user(username: str):
     expires_at = datetime.utcnow() + timedelta(days=30)
     limits = UserLimit(
         user_id=new_user.id,
-        traffic_limit_gb=50, traffic_used_gb=0.0,
+        traffic_limit_gb=50,
         max_connections=2, download_speed_mbps=0,
         expires_at=expires_at
     )

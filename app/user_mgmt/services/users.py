@@ -9,7 +9,6 @@ from ..linux import (
 )
 from .limits import apply_limits_updates
 from ..utils import generate_random_password
-from .telemetry.traffic import get_traffic_gb
 from .telemetry.connections import get_conns
 
 def build_users_payload():
@@ -39,19 +38,22 @@ def build_users_payload():
         }
 
         if user.limits:
-            current_traffic = get_traffic_gb(user.username)
-            if current_traffic != user.limits.traffic_used_gb:
-                user.limits.traffic_used_gb = current_traffic
-                db.session.commit()
-
+            download_bytes = user.limits.download_used_bytes or 0
+            upload_bytes = user.limits.upload_used_bytes or 0
+            limit_bytes = (user.limits.traffic_limit_gb or 0) * (1024 ** 3)
             over_traffic = (user.limits.traffic_limit_gb is not None and
-                            current_traffic > (user.limits.traffic_limit_gb or 0))
+                            download_bytes >= limit_bytes)
             is_expired = bool(user.limits.is_expired)
             max_conns = user.limits.max_connections
 
             data['limits'] = {
                 'traffic_limit_gb': user.limits.traffic_limit_gb,
-                'traffic_used_gb': user.limits.traffic_used_gb,
+                # traffic_used_gb remains an API alias for older clients and
+                # intentionally means download usage (the quota basis).
+                'traffic_used_gb': round(download_bytes / (1024 ** 3), 3),
+                'download_used_bytes': download_bytes,
+                'upload_used_bytes': upload_bytes,
+                'total_used_bytes': download_bytes + upload_bytes,
                 'max_connections': user.limits.max_connections,
                 'download_speed_mbps': user.limits.download_speed_mbps,
                 'expires_at': user.limits.expires_at.strftime('%Y-%m-%d') if user.limits.expires_at else None,
@@ -107,7 +109,11 @@ def create_user_full(payload: dict):
 
     return {'success': True, 'message': 'User created successfully',
             'user': {'id': new_user.id, 'username': username,
-                     'password': password, 'expires_at': expires_at.strftime('%Y-%m-%d')}}
+                     'password': password,
+                     'expires_at': expires_at.strftime('%Y-%m-%d'),
+                     'traffic_limit_gb': traffic_limit,
+                     'max_connections': max_connections,
+                     'download_speed_mbps': download_speed}}
 
 def update_user_full(user_id: int, data: dict):
     user = User.query.get_or_404(user_id)

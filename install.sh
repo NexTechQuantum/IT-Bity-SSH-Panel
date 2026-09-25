@@ -132,10 +132,11 @@ www-data ALL=(ALL) NOPASSWD: \
     /usr/bin/systemctl reload ssh, \
     /usr/bin/systemctl reload sshd, \
     /usr/bin/tee -a /etc/ssh/sshd_config, \
-    /usr/bin/rm -f /tmp/ssh_user_*.conf, \
-    /usr/bin/pkill -KILL -u *, \
+    /usr/bin/rm, \
+    /usr/bin/pkill, \
     /usr/bin/ss, \
-    /usr/bin/ps
+    /usr/bin/ps, \
+    /usr/bin/sed
 EOF
 
 # Secure permissions
@@ -159,15 +160,13 @@ if [ ! -f /etc/pam.d/sshd.backup ]; then
     echo -e "${GREEN}✓ Backup created: /etc/pam.d/sshd.backup${NC}"
 fi
 
-# Check if our line already exists
-if grep -q "check_user_limit.py" /etc/pam.d/sshd; then
-    echo -e "${YELLOW}⚠ PAM already configured, skipping...${NC}"
-else
-    # Create the connection limit check script
-    cat > /usr/local/bin/check_user_limit.py << 'LIMIT_SCRIPT'
+# Always refresh the guard so installer upgrades fix older PAM configurations.
+cat > /usr/local/bin/check_user_limit.py << 'LIMIT_SCRIPT'
 #!/usr/bin/env python3
 
+import fcntl
 import os
+import re
 import sys
 import subprocess
 from datetime import datetime
@@ -196,7 +195,7 @@ def load_env():
         log_message(f"ERROR: Failed to load .env: {e}")
         return None
 
-def get_user_limit(username):
+def get_user_policy(username):
     env = load_env()
     if not env:
         return None
@@ -214,10 +213,11 @@ def get_user_limit(username):
         
         with conn.cursor() as cursor:
             query = """
-                SELECT ul.max_connections 
+                SELECT u.is_active, ul.max_connections, ul.expires_at,
+                       ul.traffic_limit_gb, ul.download_used_bytes
                 FROM users u 
                 JOIN user_limits ul ON u.id = ul.user_id 
-                WHERE u.username = %s AND u.is_active = 1
+                WHERE u.username = %s
             """
             cursor.execute(query, (username,))
             result = cursor.fetchone()
@@ -225,7 +225,13 @@ def get_user_limit(username):
             conn.close()
             
             if result:
-                return result[0]
+                return {
+                    'is_active': bool(result[0]),
+                    'max_connections': int(result[1]),
+                    'expires_at': result[2],
+                    'traffic_limit_gb': int(result[3]),
+                    'download_used_bytes': int(result[4] or 0),
+                }
             return None
             
     except Exception as e:
@@ -234,10 +240,8 @@ def get_user_limit(username):
 
 def count_user_sessions(username):
     try:
-        import re
-        
         result = subprocess.run(
-            ['ss', '-tnp', 'state', 'established', '( sport = :22 )'],
+            ['/usr/bin/ss', '-tnp', 'state', 'established', '( sport = :22 )'],
             capture_output=True,
             text=True,
             timeout=5
@@ -252,7 +256,7 @@ def count_user_sessions(username):
         for pid in set(pids):
             try:
                 ps_result = subprocess.run(
-                    ['ps', '-o', 'user=', '-p', pid],
+                    ['/usr/bin/ps', '-o', 'user=', '-p', pid],
                     capture_output=True,
                     text=True,
                     timeout=2
@@ -270,28 +274,52 @@ def count_user_sessions(username):
 
 def main():
     username = os.environ.get('PAM_USER')
-    
+    pam_type = os.environ.get('PAM_TYPE')
+
+    # Enforce immediately after password authentication, before SSH accepts
+    # the connection. Session-stage failures may not close forwarding clients.
+    if pam_type not in (None, 'auth'):
+        sys.exit(0)
+
     if not username:
         log_message("ERROR: PAM_USER not found")
         sys.exit(0)
+
+    # Serialize decisions per user so two simultaneous logins cannot both pass.
+    safe_username = re.sub(r'[^a-zA-Z0-9_.-]', '_', username)
+    lock_file = open(f'/run/lock/itbity-ssh-{safe_username}.lock', 'w')
+    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
     
-    max_connections = get_user_limit(username)
+    policy = get_user_policy(username)
     
-    if max_connections is None:
+    if policy is None:
         log_message(f"INFO: No limit configured for user '{username}', allowing login")
         sys.exit(0)
+
+    if not policy['is_active']:
+        log_message(f"DENIED: {username} is inactive")
+        sys.exit(1)
+
+    expires_at = policy['expires_at']
+    if expires_at is not None and datetime.utcnow() >= expires_at:
+        log_message(f"DENIED: {username} expired at {expires_at} UTC")
+        sys.exit(1)
+
+    limit_bytes = policy['traffic_limit_gb'] * (1024 ** 3)
+    if policy['download_used_bytes'] >= limit_bytes:
+        log_message(
+            f"DENIED: {username} exhausted download quota "
+            f"({policy['download_used_bytes']}/{limit_bytes} bytes)"
+        )
+        sys.exit(1)
+
+    max_connections = policy['max_connections']
     
     current_sessions = count_user_sessions(username)
     
     log_message(f"USER: {username}, CURRENT: {current_sessions}, MAX: {max_connections}")
     
     if current_sessions >= max_connections:
-        print("=" * 70)
-        print("CONNECTION LIMIT REACHED!")
-        print(f"Maximum connections allowed: {max_connections}")
-        print(f"Current active connections: {current_sessions}")
-        print("Please disconnect one session or contact your administrator.")
-        print("=" * 70)
         log_message(f"DENIED: {username} reached limit ({current_sessions}/{max_connections})")
         sys.exit(1)
     else:
@@ -302,27 +330,176 @@ if __name__ == '__main__':
     main()
 LIMIT_SCRIPT
 
-    chmod +x /usr/local/bin/check_user_limit.py
-    chown root:root /usr/local/bin/check_user_limit.py
-    
-    touch /var/log/ssh_connection_limits.log
-    chmod 666 /var/log/ssh_connection_limits.log
-    
-    echo -e "${GREEN}✓ Connection limit script created${NC}"
-    
-    sed -i '/^@include common-account/a # ITBity Panel - Check user connection limit\naccount    required     pam_exec.so /usr/local/bin/check_user_limit.py' /etc/pam.d/sshd
-    
-    if grep -q "check_user_limit.py" /etc/pam.d/sshd; then
-        echo -e "${GREEN}✓ PAM configured successfully${NC}"
-    else
-        echo -e "${RED}✗ Failed to configure PAM${NC}"
-        echo -e "${YELLOW}Restoring backup...${NC}"
-        cp /etc/pam.d/sshd.backup /etc/pam.d/sshd
-        exit 1
-    fi
+chmod +x /usr/local/bin/check_user_limit.py
+chown root:root /usr/local/bin/check_user_limit.py
+
+touch /var/log/ssh_connection_limits.log
+chown root:adm /var/log/ssh_connection_limits.log
+chmod 640 /var/log/ssh_connection_limits.log
+
+echo -e "${GREEN}✓ Connection limit guard created${NC}"
+
+# Remove older ineffective hooks and install a fail-fast authentication hook.
+sed -i '\|check_user_limit.py|d; /# ITBity Panel - Check user connection limit/d; /# ITBity Panel - Enforce user connection limit/d' /etc/pam.d/sshd
+sed -i '/^@include common-auth/a # ITBity Panel - Enforce user connection limit\nauth       requisite    pam_exec.so /usr/local/bin/check_user_limit.py' /etc/pam.d/sshd
+
+if grep -Eq '^auth[[:space:]]+requisite[[:space:]]+pam_exec\.so[[:space:]]+/usr/local/bin/check_user_limit\.py$' /etc/pam.d/sshd; then
+    echo -e "${GREEN}✓ PAM authentication guard configured successfully${NC}"
+else
+    echo -e "${RED}✗ Failed to configure PAM authentication guard${NC}"
+    echo -e "${YELLOW}Restoring backup...${NC}"
+    cp /etc/pam.d/sshd.backup /etc/pam.d/sshd
+    exit 1
 fi
 
-echo -e "${GREEN}[6.3/14] Setting up NFTables for traffic accounting...${NC}"
+echo -e "${GREEN}[6.2.1/14] Installing expiry and inactive-user enforcer...${NC}"
+
+cat > /usr/local/bin/itbity_access_enforcer.py << 'ENFORCER_SCRIPT'
+#!/usr/bin/env python3
+
+import os
+import subprocess
+import time
+from datetime import datetime
+
+import pymysql
+
+ENV_FILE = '/var/www/itbity-ssh-panel/.env'
+LOG_FILE = '/var/log/itbity-access-enforcer.log'
+POLL_SECONDS = 5
+
+
+def log(message):
+    try:
+        with open(LOG_FILE, 'a') as handle:
+            handle.write(f'[{datetime.now()}] {message}\n')
+    except Exception:
+        pass
+
+
+def load_env():
+    values = {}
+    with open(ENV_FILE, 'r') as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                values[key.strip()] = value.strip().strip("'\"")
+    return values
+
+
+def get_blocked_users():
+    env = load_env()
+    connection = pymysql.connect(
+        host=env.get('DB_HOST', 'localhost'),
+        user=env['DB_USER'],
+        password=env['DB_PASSWORD'],
+        database=env['DB_NAME'],
+        charset='utf8mb4',
+        connect_timeout=3,
+    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT u.username, u.is_active, ul.expires_at,
+                       ul.traffic_limit_gb, ul.download_used_bytes
+                FROM users u
+                JOIN user_limits ul ON ul.user_id = u.id
+                WHERE u.role <> 'admin'
+                  AND (u.is_active = 0
+                       OR ul.expires_at <= UTC_TIMESTAMP()
+                       OR ul.download_used_bytes >= ul.traffic_limit_gb * 1073741824)
+            """)
+            return cursor.fetchall()
+    finally:
+        connection.close()
+
+
+def disconnect_user(username, reason):
+    probe = subprocess.run(
+        ['/usr/bin/pgrep', '-u', username],
+        capture_output=True,
+        text=True,
+        timeout=3,
+    )
+    pids = probe.stdout.split()
+    if probe.returncode != 0 or not pids:
+        return
+
+    result = subprocess.run(
+        ['/usr/bin/pkill', '-KILL', '-u', username],
+        capture_output=True,
+        text=True,
+        timeout=3,
+    )
+    if result.returncode in (0, 1):
+        log(f'DISCONNECTED: {username}; reason={reason}; pids={",".join(pids)}')
+    else:
+        log(f'ERROR: failed to disconnect {username}: {result.stderr.strip()}')
+
+
+def main():
+    log('Access enforcer started')
+    while True:
+        try:
+            for username, is_active, expires_at, traffic_limit_gb, download_used_bytes in get_blocked_users():
+                if not is_active:
+                    reason = 'inactive'
+                elif expires_at is not None and datetime.utcnow() >= expires_at:
+                    reason = f'expired_at={expires_at}_UTC'
+                else:
+                    reason = f'download_quota={download_used_bytes}/{traffic_limit_gb}_GiB'
+                disconnect_user(username, reason)
+        except Exception as error:
+            log(f'ERROR: {error}')
+        time.sleep(POLL_SECONDS)
+
+
+if __name__ == '__main__':
+    main()
+ENFORCER_SCRIPT
+
+chmod 750 /usr/local/bin/itbity_access_enforcer.py
+chown root:root /usr/local/bin/itbity_access_enforcer.py
+touch /var/log/itbity-access-enforcer.log
+chown root:adm /var/log/itbity-access-enforcer.log
+chmod 640 /var/log/itbity-access-enforcer.log
+
+cat > /etc/systemd/system/itbity-access-enforcer.service << 'ENFORCER_SERVICE'
+[Unit]
+Description=ITBity SSH access expiry and inactive-user enforcer
+After=network.target mariadb.service
+Requires=mariadb.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/itbity_access_enforcer.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+ENFORCER_SERVICE
+
+systemctl daemon-reload
+systemctl enable itbity-access-enforcer
+echo -e "${GREEN}✓ Access enforcer installed${NC}"
+
+echo -e "${GREEN}[6.3/14] Removing legacy NFTables traffic accounting...${NC}"
+
+# Older releases used a UID-based nftables input rule. It cannot attribute
+# tunneled download traffic correctly, so upgrades remove the dedicated table
+# and PAM hook. The old installer block is retained below only as inert upgrade
+# context and can never execute.
+sed -i '\|register_session.py|d; /# ITBity Panel - Register traffic session/d' /etc/pam.d/sshd
+if nft list table inet itbity_traffic >/dev/null 2>&1; then
+    nft delete table inet itbity_traffic
+fi
+echo -e "${GREEN}✓ Legacy traffic accounting removed${NC}"
+
+if false; then
 
 # Ensure nftables is installed
 apt install -y nftables
@@ -552,7 +729,11 @@ if ! grep -q "register_session.py" /etc/pam.d/sshd; then
     sed -i '/^@include common-session/a # ITBity Panel - Register traffic session\nsession    required    pam_exec.so /usr/local/bin/register_session.py' /etc/pam.d/sshd
 fi
 
-echo -e "${GREEN}✓ PAM traffic session tracking (UID-based) configured${NC}"
+# TCP telemetry discovers SSH sockets directly. Remove the legacy PAM/nft hook
+# on both fresh installs and upgrades so one login never creates duplicate rows.
+sed -i '\|register_session.py|d; /# ITBity Panel - Register traffic session/d' /etc/pam.d/sshd
+echo -e "${GREEN}✓ Legacy PAM traffic hook disabled (TCP telemetry enabled)${NC}"
+fi
 
 
 
@@ -561,11 +742,12 @@ echo -e "${GREEN}[6.5/14] Installing Traffic Daemon...${NC}"
 # Create traffic daemon script
 cat > /usr/local/bin/traffic_daemon.py << 'TRAFFIC_DAEMON'
 #!/usr/bin/env python3
-import time
+import re
 import subprocess
-import pymysql
-import json
+import time
 from datetime import datetime
+
+import pymysql
 
 ENV_FILE = "/var/www/itbity-ssh-panel/.env"
 LOG_FILE = "/var/log/traffic_daemon.log"
@@ -605,111 +787,166 @@ def db():
     )
 
 
-def get_nft_json():
-    try:
-        result = subprocess.run(
-            ["nft", "-j", "list", "chain", "inet", "itbity_traffic", "users"],
-            capture_output=True,
-            text=True
-        )
-        if result.returncode != 0:
-            log(f"NFT ERROR: {result.stderr}")
-            return None
+def socket_snapshot():
+    """Return every established SSH socket and its TCP byte counters.
 
-        return json.loads(result.stdout)
-    except Exception as e:
-        log(f"NFT JSON ERROR: {e}")
-        return None
-
-
-def extract_bytes(rule):
+    Linux reports bytes_acked from server to client (the user's download) and
+    bytes_received from client to server (the user's upload). Each socket is
+    sampled independently, so concurrent connections are naturally summed.
     """
-    nft JSON structure:
-      rule: { "expr": [ { "counter": { "packets": X, "bytes": Y } }, ... ] }
-    """
-    try:
-        for expr in rule.get("expr", []):
-            if "counter" in expr:
-                return int(expr["counter"].get("bytes", 0))
-    except Exception:
-        pass
-    return 0
+    result = subprocess.run(
+        ["/usr/bin/ss", "-Htinpe", "state", "established", "( sport = :22 )"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "ss failed")
+
+    records = []
+    current = None
+    for line in result.stdout.splitlines():
+        # ss starts each record with Recv-Q and Send-Q. Continuation lines are
+        # indented and contain process/inode/TCP information.
+        match = re.match(r"^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\S+)(.*)$", line)
+        if match:
+            if current:
+                records.append(current)
+            current = {
+                "local": match.group(3),
+                "remote": match.group(4),
+                "detail": match.group(5),
+            }
+        elif current:
+            current["detail"] += " " + line.strip()
+    if current:
+        records.append(current)
+
+    snapshot = []
+    for record in records:
+        detail = record["detail"]
+        inode = re.search(r"\bino:(\d+)", detail)
+        acked = re.search(r"\bbytes_acked:(\d+)", detail)
+        received = re.search(r"\bbytes_received:(\d+)", detail)
+        pids = re.findall(r"\bpid=(\d+)", detail)
+        if not (inode and acked and received and pids):
+            continue
+
+        remote = record["remote"]
+        if remote.startswith("[") and "]:" in remote:
+            remote_ip, remote_port = remote[1:].rsplit("]:", 1)
+        else:
+            remote_ip, remote_port = remote.rsplit(":", 1)
+
+        snapshot.append({
+            "inode": inode.group(1),
+            "remote_ip": remote_ip,
+            "remote_port": remote_port,
+            "pids": sorted(set(pids)),
+            "download": int(acked.group(1)),
+            "upload": int(received.group(1)),
+        })
+    return snapshot
+
+
+def pid_users(pids):
+    if not pids:
+        return {}
+    result = subprocess.run(
+        ["/usr/bin/ps", "-o", "pid=,user=", "-p", ",".join(sorted(set(pids)))],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    users = {}
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            users[parts[0]] = parts[1]
+    return users
 
 
 def main_loop():
-    log("Traffic daemon started.")
+    log("TCP traffic daemon started")
 
     while True:
         try:
-            nft_data = get_nft_json()
-            if not nft_data:
-                time.sleep(5)
-                continue
-
+            sockets = socket_snapshot()
             conn = db()
-            cur = conn.cursor()
-
-            # Load active sessions
-            cur.execute("""
-                SELECT s.id, s.user_id, s.nft_rule_name, s.bytes_in, s.bytes_out
-                FROM user_ip_sessions s
-                WHERE s.closed_at IS NULL
-            """)
-            sessions = cur.fetchall()
-
-            # Build quick lookup for nft rules by comment
-            rules_by_comment = {}
             try:
-                for item in nft_data.get("nftables", []):
-                    if "rule" in item:
-                        rule = item["rule"]
-                        comment = rule.get("comment")
-                        if comment:
-                            rules_by_comment[comment] = rule
-            except Exception as e:
-                log(f"Parse rules error: {e}")
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, username FROM users WHERE role <> 'admin'")
+                    managed = {username: user_id for user_id, username in cur.fetchall()}
+                    all_pids = [pid for item in sockets for pid in item["pids"]]
+                    users_by_pid = pid_users(all_pids)
+                    seen_ids = []
 
-            for sess_id, user_id, nft_rule_name, old_in, old_out in sessions:
-                rule = rules_by_comment.get(nft_rule_name)
+                    for item in sockets:
+                        username = next(
+                            (users_by_pid.get(pid) for pid in item["pids"]
+                             if users_by_pid.get(pid) in managed),
+                            None,
+                        )
+                        if not username:
+                            continue
 
-                if rule is None:
-                    # Rule no longer present → treat as ended session (only mark closed)
-                    cur.execute(
-                        "UPDATE user_ip_sessions SET closed_at = NOW() WHERE id = %s AND closed_at IS NULL",
-                        (sess_id,)
-                    )
-                    continue
+                        user_id = managed[username]
+                        key = (f"tcp:{username}:{item['remote_ip']}:"
+                               f"{item['remote_port']}:{item['inode']}")
+                        cur.execute(
+                            """SELECT id, bytes_in, bytes_out
+                               FROM user_ip_sessions
+                               WHERE session_id=%s AND closed_at IS NULL
+                               ORDER BY id DESC LIMIT 1 FOR UPDATE""",
+                            (key,),
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            session_id, old_download, old_upload = row
+                            delta_download = max(0, item["download"] - (old_download or 0))
+                            delta_upload = max(0, item["upload"] - (old_upload or 0))
+                            cur.execute(
+                                "UPDATE user_ip_sessions SET bytes_in=%s, bytes_out=%s WHERE id=%s",
+                                (item["download"], item["upload"], session_id),
+                            )
+                        else:
+                            # Counters already include the bytes used during authentication.
+                            delta_download = item["download"]
+                            delta_upload = item["upload"]
+                            cur.execute(
+                                """INSERT INTO user_ip_sessions
+                                   (user_id, ip_address, session_id, nft_rule_name,
+                                    bytes_in, bytes_out, created_at)
+                                   VALUES (%s,%s,%s,'tcp_info',%s,%s,NOW())""",
+                                (user_id, item["remote_ip"], key,
+                                 item["download"], item["upload"]),
+                            )
+                            session_id = cur.lastrowid
 
-                new_bytes_in = extract_bytes(rule)
-                if new_bytes_in < 0:
-                    new_bytes_in = 0
+                        seen_ids.append(session_id)
+                        if delta_download or delta_upload:
+                            cur.execute(
+                                """UPDATE user_limits
+                                   SET download_used_bytes=download_used_bytes+%s,
+                                       upload_used_bytes=upload_used_bytes+%s
+                                   WHERE user_id=%s""",
+                                (delta_download, delta_upload, user_id),
+                            )
 
-                delta_in = max(0, new_bytes_in - (old_in or 0))
-
-                # Update session bytes
-                cur.execute(
-                    """
-                    UPDATE user_ip_sessions
-                    SET bytes_in = %s
-                    WHERE id = %s
-                    """,
-                    (new_bytes_in, sess_id)
-                )
-
-                # Add delta to user_limits.traffic_used_gb
-                if delta_in > 0:
-                    gb = float(delta_in) / (1024.0 * 1024.0 * 1024.0)
-                    cur.execute(
-                        """
-                        UPDATE user_limits
-                        SET traffic_used_gb = traffic_used_gb + %s
-                        WHERE user_id = %s
-                        """,
-                        (gb, user_id)
-                    )
-
-            conn.close()
-
+                    if seen_ids:
+                        placeholders = ",".join(["%s"] * len(seen_ids))
+                        cur.execute(
+                            f"""UPDATE user_ip_sessions SET closed_at=NOW()
+                                WHERE closed_at IS NULL AND id NOT IN ({placeholders})""",
+                            seen_ids,
+                        )
+                    else:
+                        cur.execute(
+                            "UPDATE user_ip_sessions SET closed_at=NOW() WHERE closed_at IS NULL"
+                        )
+                conn.commit()
+            finally:
+                conn.close()
         except Exception as e:
             log(f"MAIN LOOP ERROR: {e}")
 
@@ -973,7 +1210,7 @@ User=www-data
 Group=www-data
 WorkingDirectory=/var/www/itbity-ssh-panel
 Environment="PATH=/var/www/itbity-ssh-panel/venv/bin"
-ExecStart=/var/www/itbity-ssh-panel/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:5000 --timeout 120 --access-logfile /var/log/itbity-panel-access.log --error-logfile /var/log/itbity-panel-error.log wsgi:app
+ExecStart=/var/www/itbity-ssh-panel/venv/bin/gunicorn --no-control-socket --workers 3 --bind 127.0.0.1:5000 --timeout 120 --access-logfile /var/log/itbity-panel-access.log --error-logfile /var/log/itbity-panel-error.log wsgi:app
 Restart=always
 RestartSec=3
 StandardOutput=journal
@@ -1019,6 +1256,7 @@ echo -e "${BLUE}Starting panel service...${NC}"
 systemctl daemon-reload
 systemctl enable itbity-ssh-panel
 systemctl start itbity-ssh-panel
+systemctl restart itbity-access-enforcer
 
 # Wait for service to start
 sleep 5

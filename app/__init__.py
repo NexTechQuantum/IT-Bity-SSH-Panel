@@ -14,7 +14,10 @@ migrate = Migrate()
 def get_locale():
     if 'language' in session:
         return session['language']
-    return request.accept_languages.best_match(Config.LANGUAGES.keys())
+    return request.accept_languages.best_match(
+        Config.LANGUAGES.keys(),
+        default=Config.BABEL_DEFAULT_LOCALE,
+    )
 
 def create_app(config_class=Config):
     app = Flask(__name__, 

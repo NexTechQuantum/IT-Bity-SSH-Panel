@@ -2,6 +2,7 @@
 
 let allUsers = [];
 let currentFilter = 'all';
+let lastCreatedUserDetails = null;
 
 document.addEventListener('DOMContentLoaded', function () {
   setupEventListeners();
@@ -154,16 +155,101 @@ async function createUser(userData) {
     });
     const data = await res.json();
     if (!data.success) return Swal.fire({ icon: 'error', title: 'Error', text: data.message });
+    lastCreatedUserDetails = data.user;
+    const username = escapeHtml(data.user.username);
+    const password = escapeHtml(data.user.password);
+    const expiresAt = escapeHtml(data.user.expires_at);
+    const trafficLimit = Number(data.user.traffic_limit_gb ?? userData.traffic_limit ?? 0);
+    const maxConnections = Number(data.user.max_connections ?? userData.max_connections ?? 0);
+
     Swal.fire({
       icon: 'success', title: 'User Created!',
       html: `<div style="text-align:left;background:#f8f9fa;padding:15px;border-radius:8px;margin-top:15px;">
-               <p><strong>Username:</strong> ${data.user.username}</p>
-               <p><strong>Password:</strong> <code style="background:#e9ecef;padding:2px 6px;border-radius:4px;">${data.user.password}</code></p>
-               <p><strong>Expires:</strong> ${data.user.expires_at}</p>
-             </div>`
+               <p><strong>Username:</strong> ${username}</p>
+               <p style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                 <strong>Password:</strong>
+                 <code style="background:#e9ecef;padding:4px 7px;border-radius:4px;">${password}</code>
+                 <button type="button" onclick="copyCreatedPassword(this)" title="Copy password" aria-label="Copy password" style="border:0;background:#667eea;color:#fff;border-radius:6px;padding:5px 9px;cursor:pointer;">
+                   <i class="fas fa-copy"></i>
+                 </button>
+               </p>
+               <p><strong>Expires:</strong> ${expiresAt}</p>
+               <p><strong>Traffic:</strong> ${trafficLimit} GB</p>
+               <p><strong>Max Connections:</strong> ${maxConnections}</p>
+               <button type="button" onclick="shareCreatedUser(this)" style="width:100%;margin-top:8px;border:0;background:#10b981;color:#fff;border-radius:8px;padding:10px 14px;cursor:pointer;font-weight:600;">
+                 <i class="fas fa-share-nodes"></i> Share / Send Details
+               </button>
+             </div>`,
+      confirmButtonText: 'OK'
     }).then(loadUsers);
   } catch (err) {
     Swal.fire({ icon: 'error', title: 'Error', text: 'Failed to create user: ' + err.message });
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+async function writeClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  textarea.remove();
+  if (!copied) throw new Error('Clipboard is unavailable');
+}
+
+async function copyCreatedPassword(button) {
+  if (!lastCreatedUserDetails) return;
+  try {
+    await writeClipboard(lastCreatedUserDetails.password);
+    const original = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-check"></i>';
+    setTimeout(() => { button.innerHTML = original; }, 1400);
+  } catch (err) {
+    Swal.showValidationMessage('Could not copy the password');
+  }
+}
+
+function buildUserShareMessage(user) {
+  return [
+    'IT Bity SSH Account',
+    `Username: ${user.username}`,
+    `Password: ${user.password}`,
+    `Expires: ${user.expires_at}`,
+    `Traffic: ${user.traffic_limit_gb} GB`,
+    `Max Connections: ${user.max_connections}`,
+  ].join('\n');
+}
+
+async function shareCreatedUser(button) {
+  if (!lastCreatedUserDetails) return;
+  const text = buildUserShareMessage(lastCreatedUserDetails);
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'IT Bity SSH Account', text });
+      return;
+    }
+    await writeClipboard(text);
+    const original = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-check"></i> Details copied';
+    setTimeout(() => { button.innerHTML = original; }, 1800);
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    Swal.showValidationMessage('Could not share or copy the details');
   }
 }
 
@@ -279,10 +365,35 @@ async function resetPassword(userId) {
       const data = await res.json();
       if (!data.success) return Swal.fire('Error', data.message, 'error');
 
+      lastCreatedUserDetails = {
+        username: user.username,
+        password: newPassword,
+        expires_at: user.limits?.expires_at || '-',
+        traffic_limit_gb: user.limits?.traffic_limit_gb ?? 0,
+        max_connections: user.limits?.max_connections ?? user.max_connections ?? 0,
+      };
+
       Swal.fire({
         icon: 'success',
         title: 'Password Reset!',
-        html: `New password: <code style="background:#f3f4f6;padding:4px 8px;border-radius:4px;">${newPassword}</code><br><br><span style="color:#dc3545;">Save this password!</span>`,
+        html: `<div style="text-align:left;background:#f8f9fa;padding:15px;border-radius:8px;margin-top:15px;">
+                 <p><strong>Username:</strong> ${escapeHtml(lastCreatedUserDetails.username)}</p>
+                 <p style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                   <strong>New Password:</strong>
+                   <code style="background:#e9ecef;padding:4px 7px;border-radius:4px;">${escapeHtml(newPassword)}</code>
+                   <button type="button" onclick="copyCreatedPassword(this)" title="Copy password" aria-label="Copy password" style="border:0;background:#667eea;color:#fff;border-radius:6px;padding:5px 9px;cursor:pointer;">
+                     <i class="fas fa-copy"></i>
+                   </button>
+                 </p>
+                 <p><strong>Expires:</strong> ${escapeHtml(lastCreatedUserDetails.expires_at)}</p>
+                 <p><strong>Traffic:</strong> ${lastCreatedUserDetails.traffic_limit_gb} GB</p>
+                 <p><strong>Max Connections:</strong> ${lastCreatedUserDetails.max_connections}</p>
+                 <button type="button" onclick="shareCreatedUser(this)" style="width:100%;margin-top:8px;border:0;background:#10b981;color:#fff;border-radius:8px;padding:10px 14px;cursor:pointer;font-weight:600;">
+                   <i class="fas fa-share-nodes"></i> Share / Send Details
+                 </button>
+               </div>
+               <p style="color:#dc3545;margin-top:15px;">Save this password!</p>`,
+        confirmButtonText: 'OK',
       });
     } catch (err) {
       Swal.fire('Error', 'Failed to reset password', 'error');
@@ -498,9 +609,11 @@ function displayUsers(users) {
         : user.limits
         ? `
           <div style="font-size:12px;">
-            <div>${user.limits.traffic_used_gb} / ${user.limits.traffic_limit_gb} GB</div>
+            <div title="Download is used for the quota"><i class="fas fa-download" style="width:14px;"></i> ${formatTrafficBytes(user.limits.download_used_bytes)} / ${user.limits.traffic_limit_gb} GB</div>
+            <div style="margin-top:3px;color:var(--text-secondary);"><i class="fas fa-upload" style="width:14px;"></i> ${formatTrafficBytes(user.limits.upload_used_bytes)}</div>
+            <div style="margin-top:3px;color:var(--text-secondary);"><i class="fas fa-chart-pie" style="width:14px;"></i> Total: ${formatTrafficBytes(user.limits.total_used_bytes)}</div>
             <div style="margin-top:4px;background:var(--bg-secondary);height:6px;border-radius:3px;overflow:hidden;">
-              <div style="width:${Math.min((user.limits.traffic_used_gb / user.limits.traffic_limit_gb) * 100, 100)}%;height:100%;background:${getTrafficColor(user.limits.traffic_used_gb, user.limits.traffic_limit_gb)};"></div>
+              <div style="width:${Math.min(user.limits.traffic_limit_gb > 0 ? (user.limits.traffic_used_gb / user.limits.traffic_limit_gb) * 100 : 100, 100)}%;height:100%;background:${getTrafficColor(user.limits.traffic_used_gb, user.limits.traffic_limit_gb)};"></div>
             </div>
             ${user.limits.expires_at ? `<div style="margin-top:4px;color:var(--text-secondary);">Expires: ${user.limits.expires_at}</div>` : ''}
           </div>`
@@ -587,6 +700,19 @@ function displayUsers(users) {
       </tr>`;
     })
     .join('');
+}
+
+function formatTrafficBytes(value) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let amount = bytes;
+  let unit = -1;
+  do {
+    amount /= 1024;
+    unit += 1;
+  } while (amount >= 1024 && unit < units.length - 1);
+  return `${amount.toFixed(amount >= 100 ? 0 : amount >= 10 ? 1 : 2)} ${units[unit]}`;
 }
 
 function getRoleColor(role) {

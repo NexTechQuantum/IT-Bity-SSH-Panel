@@ -64,6 +64,12 @@ class UserLimit(db.Model):
     )
     
     traffic_limit_gb = db.Column(db.Integer, default=50, nullable=False)
+    # Keep exact counters in bytes.  Floating-point GB values drift over time
+    # and cannot be updated safely by concurrent traffic samples.
+    download_used_bytes = db.Column(db.BigInteger, default=0, nullable=False)
+    upload_used_bytes = db.Column(db.BigInteger, default=0, nullable=False)
+    # Legacy column kept for backwards-compatible upgrades. New code does not
+    # use it as the source of truth.
     traffic_used_gb = db.Column(db.Float, default=0.0, nullable=False)
     max_connections = db.Column(db.Integer, default=2, nullable=False)
     download_speed_mbps = db.Column(db.Integer, default=0, nullable=False)
@@ -71,7 +77,19 @@ class UserLimit(db.Model):
 
     @property
     def traffic_remaining_gb(self):
-        return max(0, self.traffic_limit_gb - self.traffic_used_gb)
+        return max(0, self.traffic_limit_gb - self.download_used_gb)
+
+    @property
+    def download_used_gb(self):
+        return self.download_used_bytes / (1024 ** 3)
+
+    @property
+    def upload_used_gb(self):
+        return self.upload_used_bytes / (1024 ** 3)
+
+    @property
+    def total_used_gb(self):
+        return (self.download_used_bytes + self.upload_used_bytes) / (1024 ** 3)
     
     @property
     def is_expired(self):
