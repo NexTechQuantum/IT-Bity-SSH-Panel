@@ -2,6 +2,8 @@ from flask import Blueprint, render_template, request, jsonify, flash, redirect,
 from flask_login import login_required, current_user
 from flask_babel import gettext as _
 from functools import wraps
+import json
+import subprocess
 
 settings_bp = Blueprint('settings', __name__)
 
@@ -47,20 +49,49 @@ def install_ssl():
 @login_required
 @admin_required
 def get_ssh_config():
-    """Get SSH configuration - TODO: Implement"""
-    return jsonify({
-        'success': True,
-        'encryption_type': 'aes256-ctr',
-        'udp_enabled': False,
-        'compression': True
-    })
+    """Read the panel-managed OpenSSH encryption profile."""
+    try:
+        result = subprocess.run(
+            ['/usr/bin/sudo', '/usr/local/sbin/itbity-ssh-profile', 'get'],
+            capture_output=True, text=True, timeout=10, check=True,
+        )
+        return jsonify(json.loads(result.stdout))
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as error:
+        return jsonify({
+            'success': False,
+            'message': f'Unable to read SSH configuration: {error}',
+        }), 500
 
 @settings_bp.route('/api/ssh/config', methods=['PUT'])
 @login_required
 @admin_required
 def update_ssh_config():
-    """Update SSH configuration - TODO: Implement"""
-    return jsonify({'success': False, 'message': 'Not implemented yet'}), 501
+    """Safely validate, apply and reload a whitelisted SSH profile."""
+    payload = request.get_json(silent=True) or {}
+    profile = payload.get('profile')
+    compression = payload.get('compression')
+    if profile not in {'automatic', 'modern', 'compatible'}:
+        return jsonify({'success': False, 'message': 'Invalid encryption profile'}), 400
+    if not isinstance(compression, bool):
+        return jsonify({'success': False, 'message': 'Compression must be true or false'}), 400
+
+    try:
+        result = subprocess.run(
+            [
+                '/usr/bin/sudo', '/usr/local/sbin/itbity-ssh-profile', 'apply',
+                profile, 'yes' if compression else 'no',
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        response = json.loads(result.stdout or '{}')
+        if result.returncode != 0 or not response.get('success'):
+            return jsonify(response or {
+                'success': False,
+                'message': result.stderr.strip() or 'SSH validation failed',
+            }), 500
+        return jsonify(response)
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as error:
+        return jsonify({'success': False, 'message': f'Unable to update SSH: {error}'}), 500
 
 # Two-Factor Authentication
 @settings_bp.route('/api/2fa/status', methods=['GET'])

@@ -120,6 +120,149 @@ apt install -y nginx
 
 echo -e "${GREEN}[6.1/14] Configuring sudo permissions for www-data...${NC}"
 
+# Install a narrow root helper for the Settings page. It accepts only known
+# profiles, validates the complete sshd configuration and rolls back on error.
+cat > /usr/local/sbin/itbity-ssh-profile << 'SSH_PROFILE_HELPER'
+#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+CONFIG_FILE = '/etc/ssh/sshd_config.d/60-itbity-crypto.conf'
+PROFILES = {
+    'automatic': None,
+    'modern': (
+        'chacha20-poly1305@openssh.com,'
+        'aes256-gcm@openssh.com,aes128-gcm@openssh.com'
+    ),
+    'compatible': (
+        'chacha20-poly1305@openssh.com,'
+        'aes256-gcm@openssh.com,aes128-gcm@openssh.com,'
+        'aes256-ctr,aes128-ctr'
+    ),
+}
+
+
+def output(success, message, **extra):
+    print(json.dumps({'success': success, 'message': message, **extra}))
+
+
+def read_state():
+    profile = 'automatic'
+    compression = False
+    try:
+        with open(CONFIG_FILE, encoding='utf-8') as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if line.startswith('# Profile:'):
+                    candidate = line.split(':', 1)[1].strip()
+                    if candidate in PROFILES:
+                        profile = candidate
+                elif line.lower().startswith('compression '):
+                    compression = line.split(None, 1)[1].lower() == 'yes'
+    except FileNotFoundError:
+        pass
+
+    effective = subprocess.run(
+        ['/usr/sbin/sshd', '-T'], capture_output=True, text=True, timeout=8
+    )
+    ciphers = ''
+    if effective.returncode == 0:
+        for line in effective.stdout.splitlines():
+            if line.startswith('ciphers '):
+                ciphers = line.split(None, 1)[1]
+                break
+    output(True, 'SSH configuration loaded', profile=profile,
+           compression=compression, effective_ciphers=ciphers)
+
+
+def apply(profile, compression):
+    if profile not in PROFILES or compression not in ('yes', 'no'):
+        output(False, 'Invalid profile or compression value')
+        return 2
+
+    lines = [
+        '# Managed by IT Bity SSH Panel',
+        f'# Profile: {profile}',
+        f'Compression {compression}',
+    ]
+    if PROFILES[profile]:
+        lines.append(f'Ciphers {PROFILES[profile]}')
+    content = '\n'.join(lines) + '\n'
+
+    os.makedirs(os.path.dirname(CONFIG_FILE), mode=0o755, exist_ok=True)
+    previous = None
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'rb') as handle:
+            previous = handle.read()
+
+    descriptor, candidate = tempfile.mkstemp(
+        prefix='.60-itbity-crypto.', dir=os.path.dirname(CONFIG_FILE)
+    )
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(candidate, 0o644)
+        os.replace(candidate, CONFIG_FILE)
+
+        validation = subprocess.run(
+            ['/usr/sbin/sshd', '-t'], capture_output=True, text=True, timeout=8
+        )
+        if validation.returncode != 0:
+            if previous is None:
+                os.unlink(CONFIG_FILE)
+            else:
+                with open(CONFIG_FILE, 'wb') as handle:
+                    handle.write(previous)
+                os.chmod(CONFIG_FILE, 0o644)
+            output(False, validation.stderr.strip() or 'sshd validation failed')
+            return 1
+
+        reload_result = subprocess.run(
+            ['/usr/bin/systemctl', 'reload', 'ssh'],
+            capture_output=True, text=True, timeout=8,
+        )
+        if reload_result.returncode != 0:
+            if previous is None:
+                os.unlink(CONFIG_FILE)
+            else:
+                with open(CONFIG_FILE, 'wb') as handle:
+                    handle.write(previous)
+                os.chmod(CONFIG_FILE, 0o644)
+            subprocess.run(
+                ['/usr/bin/systemctl', 'reload', 'ssh'],
+                capture_output=True, text=True, timeout=8,
+            )
+            output(False, reload_result.stderr.strip() or 'SSH reload failed')
+            return 1
+        output(True, 'SSH profile validated and applied', profile=profile,
+               compression=(compression == 'yes'))
+        return 0
+    finally:
+        if os.path.exists(candidate):
+            os.unlink(candidate)
+
+
+if __name__ == '__main__':
+    if os.geteuid() != 0:
+        output(False, 'This helper must run as root')
+        sys.exit(1)
+    if len(sys.argv) == 2 and sys.argv[1] == 'get':
+        read_state()
+    elif len(sys.argv) == 4 and sys.argv[1] == 'apply':
+        sys.exit(apply(sys.argv[2], sys.argv[3]))
+    else:
+        output(False, 'Usage: itbity-ssh-profile get|apply PROFILE yes|no')
+        sys.exit(2)
+SSH_PROFILE_HELPER
+
+chmod 750 /usr/local/sbin/itbity-ssh-profile
+chown root:root /usr/local/sbin/itbity-ssh-profile
+
 # Create or overwrite sudoers file safely
 cat > /etc/sudoers.d/itbity-panel <<'EOF'
 # ITBity Panel restricted sudo permissions for www-data
@@ -136,7 +279,8 @@ www-data ALL=(ALL) NOPASSWD: \
     /usr/bin/pkill, \
     /usr/bin/ss, \
     /usr/bin/ps, \
-    /usr/bin/sed
+    /usr/bin/sed, \
+    /usr/local/sbin/itbity-ssh-profile
 EOF
 
 # Secure permissions

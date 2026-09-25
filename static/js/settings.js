@@ -45,9 +45,16 @@ function handleToggleChange(e) {
     showNotification('Setting updated', 'success');
 }
 
-function loadSettings() {
-    // TODO: Load settings from backend
-    console.log('Loading settings...');
+async function loadSettings() {
+    try {
+        const response = await fetch('api/ssh/config', { headers: { Accept: 'application/json' } });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Unable to load SSH settings');
+        document.getElementById('encryptionType').value = data.profile || 'automatic';
+        document.getElementById('sshCompression').checked = Boolean(data.compression);
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
 }
 
 // SSL Functions
@@ -57,21 +64,26 @@ function installSSL() {
 }
 
 // SSH Configuration
-function saveSSHConfig() {
-    const encryptionType = document.getElementById('encryptionType').value;
-    const udpEnabled = document.getElementById('sshUDP').checked;
+async function saveSSHConfig() {
+    const profile = document.getElementById('encryptionType').value;
     const compressionEnabled = document.getElementById('sshCompression').checked;
-    
-    console.log('SSH Config:', {
-        encryptionType,
-        udpEnabled,
-        compressionEnabled
-    });
-    
-    alert('SSH Configuration saved!\n\nSettings:\n- Encryption: ' + encryptionType + '\n- UDP: ' + (udpEnabled ? 'Enabled' : 'Disabled') + '\n- Compression: ' + (compressionEnabled ? 'Enabled' : 'Disabled'));
-    
-    // TODO: Save to backend
-    showNotification('SSH configuration saved', 'success');
+    const button = document.getElementById('saveSSHButton');
+    button.disabled = true;
+    try {
+        const response = await fetch('api/ssh/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ profile, compression: compressionEnabled }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'SSH validation failed');
+        showNotification('SSH profile validated and applied', 'success');
+        await loadSettings();
+    } catch (error) {
+        showNotification(error.message, 'error');
+    } finally {
+        button.disabled = false;
+    }
 }
 
 // File Upload Functions
@@ -185,7 +197,7 @@ function showNotification(message, type = 'info') {
         position: fixed;
         top: 80px;
         right: 20px;
-        background: ${type === 'success' ? '#10b981' : '#3b82f6'};
+        background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
         color: white;
         padding: 14px 20px;
         border-radius: 10px;
