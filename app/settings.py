@@ -5,7 +5,7 @@ from functools import wraps
 import json
 import os
 import subprocess
-import tempfile
+import uuid
 from app import db
 from app.models import AppSetting, RecommendedApp
 
@@ -307,9 +307,10 @@ def upload_restore_backup():
         return jsonify({'success': False, 'message': 'Choose an IT Bity ZIP backup'}), 400
     if request.content_length and request.content_length > 51 * 1024 * 1024:
         return jsonify({'success': False, 'message': 'Backup file is larger than 50 MB'}), 413
-    descriptor, path = tempfile.mkstemp(prefix='itbity-restore-', suffix='.zip', dir='/tmp')
-    os.close(descriptor)
+    path = f'/tmp/itbity-restore-{uuid.uuid4().hex}.zip'
     try:
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(descriptor)
         uploaded.save(path)
         return jsonify(_backup_helper('stage', os.path.basename(path), timeout=40))
     except Exception as error:
