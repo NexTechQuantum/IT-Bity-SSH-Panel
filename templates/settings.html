@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/variables.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/footer.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css', v='20260926-telegram-backup-v1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css', v='20260926-telegram-backup-v2') }}">
     
     <style>
         [dir="rtl"] body {
@@ -271,8 +271,8 @@
                     <div class="card-body">
                         <div class="setting-row" style="display:block;">
                             <div class="backup-config-grid">
-                                <label><span>Daily time <small>(server time)</small></span><input class="form-select" id="backupSchedule" type="time" value="02:00"></label>
-                                <label><span>Telegram channel</span><input class="form-select" id="backupChatId" placeholder="@channel or -100..."></label>
+                                <label class="backup-time-field"><span>Daily time <small>(server time)</small></span><input class="form-select" id="backupSchedule" type="time" value="02:00"></label>
+                                <label class="backup-channel-field"><span>Telegram channel</span><input class="form-select" id="backupChatId" placeholder="@channel_name or -1001234567890"></label>
                                 <label class="backup-token-field"><span>Bot token</span><div><input class="form-select" id="backupToken" type="password" autocomplete="new-password" placeholder="Leave empty to keep saved token"><button type="button" onclick="toggleBackupToken()" aria-label="Show token"><i class="fas fa-eye"></i></button></div></label>
                             </div>
                             <p class="setting-desc" style="margin-top:10px;"><i class="fas fa-shield-halved"></i> The bot must be an administrator in the target channel. Token is stored only in a root-readable file.</p>

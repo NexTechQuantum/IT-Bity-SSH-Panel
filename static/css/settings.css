@@ -445,8 +445,9 @@
 
 .backup-config-grid {
     display: grid;
-    grid-template-columns: 150px 1fr 1.5fr;
-    gap: 12px;
+    grid-template-columns: minmax(145px, 180px) minmax(220px, 1fr);
+    gap: 16px 14px;
+    align-items: end;
 }
 
 .backup-config-grid label > span {
@@ -458,10 +459,12 @@
 }
 
 .backup-config-grid label small { color: var(--text-secondary); font-weight: 400; }
+.backup-token-field { grid-column: 1 / -1; }
 .backup-token-field > div { display: flex; position: relative; }
 .backup-token-field input { padding-right: 42px; }
 .backup-token-field button { position: absolute; right: 5px; top: 5px; width: 32px; height: 32px; border: 0; border-radius: 7px; color: var(--text-secondary); background: transparent; cursor: pointer; }
 
 @media (max-width: 768px) {
     .backup-config-grid { grid-template-columns: 1fr; }
+    .backup-token-field { grid-column: auto; }
 }
