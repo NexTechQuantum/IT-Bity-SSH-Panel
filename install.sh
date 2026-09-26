@@ -1150,12 +1150,35 @@ def main_loop():
                         row = cur.fetchone()
                         if row:
                             session_id, old_download, old_upload = row
-                            delta_download = max(0, item["download"] - (old_download or 0))
-                            delta_upload = max(0, item["upload"] - (old_upload or 0))
-                            cur.execute(
-                                "UPDATE user_ip_sessions SET bytes_in=%s, bytes_out=%s WHERE id=%s",
-                                (item["download"], item["upload"], session_id),
-                            )
+                            old_download = old_download or 0
+                            old_upload = old_upload or 0
+                            if item["download"] < old_download or item["upload"] < old_upload:
+                                # A rapidly reconnected socket can reuse the same
+                                # inode/port. Preserve the completed counters and
+                                # start a new history row instead of overwriting
+                                # them with the reset TCP counters.
+                                cur.execute(
+                                    "UPDATE user_ip_sessions SET closed_at=NOW() WHERE id=%s",
+                                    (session_id,),
+                                )
+                                cur.execute(
+                                    """INSERT INTO user_ip_sessions
+                                       (user_id, ip_address, session_id, nft_rule_name,
+                                        bytes_in, bytes_out, created_at)
+                                       VALUES (%s,%s,%s,'tcp_info',%s,%s,NOW())""",
+                                    (user_id, item["remote_ip"], key,
+                                     item["download"], item["upload"]),
+                                )
+                                session_id = cur.lastrowid
+                                delta_download = item["download"]
+                                delta_upload = item["upload"]
+                            else:
+                                delta_download = item["download"] - old_download
+                                delta_upload = item["upload"] - old_upload
+                                cur.execute(
+                                    "UPDATE user_ip_sessions SET bytes_in=%s, bytes_out=%s WHERE id=%s",
+                                    (item["download"], item["upload"], session_id),
+                                )
                         else:
                             # Counters already include the bytes used during authentication.
                             delta_download = item["download"]
