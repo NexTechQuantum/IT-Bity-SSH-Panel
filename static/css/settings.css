@@ -193,6 +193,24 @@
     flex: 1;
 }
 
+.setting-row.stacked-setting {
+    display: block;
+}
+
+.setting-row.stacked-setting .setting-info {
+    width: 100%;
+}
+
+.setting-row.stacked-setting .setting-desc {
+    display: block;
+    white-space: normal;
+}
+
+.setting-row.stacked-setting > .form-select {
+    width: 100%;
+    margin-top: 12px;
+}
+
 .setting-info label {
     display: block;
     font-size: 15px;

@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/variables.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/footer.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css', v='20260926-stacked-settings-v1') }}">
     
     <style>
         [dir="rtl"] body {
@@ -80,7 +80,7 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="setting-row" style="display:block;">
+                        <div class="setting-row">
                             <div class="setting-info">
                                 <label>{{ _('Auto-renew') }}</label>
                                 <span class="setting-desc">{{ _('Automatically renew SSL certificate') }}</span>
@@ -109,18 +109,18 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="setting-row">
+                        <div class="setting-row stacked-setting">
                             <div class="setting-info">
                                 <label>{{ _('Encryption Profile') }}</label>
                                 <span class="setting-desc">{{ _('Choose a secure OpenSSH cipher profile') }}</span>
                             </div>
-                            <select class="form-select" id="encryptionType" style="width:100%;margin-top:12px;">
+                            <select class="form-select" id="encryptionType">
                                 <option value="automatic">Automatic (Recommended)</option>
                                 <option value="modern">Modern — ChaCha20 + AES-GCM</option>
                                 <option value="compatible">Compatible — Modern + AES-CTR</option>
                             </select>
                         </div>
-                        <div class="setting-row" style="display:block;">
+                        <div class="setting-row stacked-setting">
                             <div class="setting-info">
                                 <label>{{ _('WireGuard UDP') }}</label>
                                 <span class="setting-desc">{{ _('Real UDP tunnel for calls and video') }}</span>
