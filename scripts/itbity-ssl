@@ -7,7 +7,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 
 STATE_DIR = Path('/etc/itbity-ssl')
@@ -23,18 +22,23 @@ def valid_domain(value):
         raise ValueError('Enter a valid domain or subdomain')
     return value
 
-def public_ip():
-    with urllib.request.urlopen('https://api.ipify.org', timeout=8) as response:
-        return str(ipaddress.ip_address(response.read().decode().strip()))
+def server_ip():
+    """Return the primary IPv4 address assigned to this server."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(('1.1.1.1', 53))
+        return str(ipaddress.ip_address(probe.getsockname()[0]))
+    finally:
+        probe.close()
 
 def resolved_ipv4(domain):
     return sorted({item[4][0] for item in socket.getaddrinfo(domain, 443, socket.AF_INET, socket.SOCK_STREAM)})
 
 def check(domain):
     domain = valid_domain(domain)
-    server_ip = public_ip()
+    host_ip = server_ip()
     addresses = resolved_ipv4(domain)
-    return {'domain': domain, 'server_ip': server_ip, 'resolved_ips': addresses, 'matches': server_ip in addresses}
+    return {'domain': domain, 'server_ip': host_ip, 'resolved_ips': addresses, 'matches': host_ip in addresses}
 
 def status():
     domain = DOMAIN_FILE.read_text().strip() if DOMAIN_FILE.exists() else ''
@@ -45,11 +49,11 @@ def status():
         if result.returncode == 0:
             expiry = result.stdout.strip().removeprefix('notAfter=')
     try:
-        server_ip = public_ip()
+        host_ip = server_ip()
     except Exception:
-        server_ip = None
+        host_ip = None
     return {'enabled': bool(certificate and certificate.exists()), 'domain': domain, 'expires_at': expiry,
-            'server_ip': server_ip, 'nginx_installed': bool(shutil.which('nginx')), 'certbot_installed': bool(shutil.which('certbot'))}
+            'server_ip': host_ip, 'nginx_installed': bool(shutil.which('nginx')), 'certbot_installed': bool(shutil.which('certbot'))}
 
 def open_firewall_ports():
     """Open HTTP/HTTPS in an active host firewall without enabling a new firewall."""
