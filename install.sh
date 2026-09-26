@@ -307,6 +307,7 @@ rm -f /tmp/itbity-wireguard-install.json
 # Telegram full-backup helper. Credentials and archives are root-only.
 install -o root -g root -m 750 "$SCRIPT_DIR/scripts/itbity-backup" /usr/local/sbin/itbity-backup
 install -o root -g root -m 750 "$SCRIPT_DIR/scripts/itbity-ssl" /usr/local/sbin/itbity-ssl
+install -o root -g root -m 750 "$SCRIPT_DIR/scripts/itbity-static-site" /usr/local/sbin/itbity-static-site
 mkdir -p /etc/itbity-ssl
 chmod 700 /etc/itbity-ssl
 mkdir -p /etc/itbity-backup /var/lib/itbity-backup
@@ -337,16 +338,17 @@ EOF
 
 install -o root -g root -m 440 "$SCRIPT_DIR/systemd/itbity-backup.sudoers" /etc/sudoers.d/itbity-backup
 install -o root -g root -m 440 "$SCRIPT_DIR/systemd/itbity-ssl.sudoers" /etc/sudoers.d/itbity-ssl
+install -o root -g root -m 440 "$SCRIPT_DIR/systemd/itbity-static-site.sudoers" /etc/sudoers.d/itbity-static-site
 
 # Secure permissions
 chmod 440 /etc/sudoers.d/itbity-panel
 
 # Validate sudoers syntax before proceeding
-if visudo -cf /etc/sudoers.d/itbity-panel >/dev/null 2>&1 && visudo -cf /etc/sudoers.d/itbity-backup >/dev/null 2>&1 && visudo -cf /etc/sudoers.d/itbity-ssl >/dev/null 2>&1; then
+if visudo -cf /etc/sudoers.d/itbity-panel >/dev/null 2>&1 && visudo -cf /etc/sudoers.d/itbity-backup >/dev/null 2>&1 && visudo -cf /etc/sudoers.d/itbity-ssl >/dev/null 2>&1 && visudo -cf /etc/sudoers.d/itbity-static-site >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Sudoers file validated successfully${NC}"
 else
     echo -e "${RED}✗ Invalid sudoers file! Aborting installation.${NC}"
-    rm -f /etc/sudoers.d/itbity-panel /etc/sudoers.d/itbity-backup /etc/sudoers.d/itbity-ssl
+    rm -f /etc/sudoers.d/itbity-panel /etc/sudoers.d/itbity-backup /etc/sudoers.d/itbity-ssl /etc/sudoers.d/itbity-static-site
     exit 1
 fi
 
@@ -1481,6 +1483,14 @@ server {
         expires 30d;
         access_log off;
         add_header Cache-Control "public, immutable";
+    }
+
+    # IT Bity static website
+    root /var/www/itbity-static-site;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
     }
 }
 NGINX_CONFIG

@@ -442,6 +442,7 @@
         flex-direction: column;
     }
 }
+.static-site-drop-zone{display:flex;min-height:230px;align-items:center;justify-content:center;flex-direction:column}.static-site-drop-zone small{display:block;margin:-6px 0 16px;color:var(--text-secondary);font-size:11px}.static-site-drop-zone.is-dragging{border-color:var(--primary);background:rgba(79,70,229,.05)}
 
 .backup-config-grid {
     display: grid;

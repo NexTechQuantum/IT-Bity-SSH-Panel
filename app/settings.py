@@ -132,6 +132,20 @@ def _backup_helper(*arguments, input_text=None, timeout=30):
     return payload
 
 
+def _static_site_helper(*arguments, timeout=60):
+    result = subprocess.run(
+        ['/usr/bin/sudo', '/usr/local/sbin/itbity-static-site', *map(str, arguments)],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    try:
+        payload = json.loads(result.stdout or '{}')
+    except json.JSONDecodeError:
+        payload = {'success': False, 'message': result.stderr.strip() or 'Invalid static-site helper response'}
+    if result.returncode != 0 or not payload.get('success'):
+        raise RuntimeError(payload.get('message') or result.stderr.strip() or 'Static website operation failed')
+    return payload
+
+
 @settings_bp.route('/api/wireguard/config', methods=['GET'])
 @login_required
 @admin_required
@@ -202,12 +216,40 @@ def toggle_2fa():
     return jsonify({'success': False, 'message': 'Invalid 2FA action'}), 400
 
 # Static Website Upload
+@settings_bp.route('/api/static-site/status', methods=['GET'])
+@login_required
+@admin_required
+def static_site_status():
+    try:
+        return jsonify(_static_site_helper('status', timeout=10))
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500
+
+
 @settings_bp.route('/api/static-site/upload', methods=['POST'])
 @login_required
 @admin_required
 def upload_static_site():
-    """Upload static website - TODO: Implement"""
-    return jsonify({'success': False, 'message': 'Not implemented yet'}), 501
+    upload = request.files.get('website')
+    if not upload or not upload.filename:
+        return jsonify({'success': False, 'message': 'Choose a ZIP file'}), 400
+    if not upload.filename.lower().endswith('.zip'):
+        return jsonify({'success': False, 'message': 'Only ZIP files are accepted'}), 400
+    temporary = f'/tmp/itbity-static-{uuid.uuid4().hex}.zip'
+    try:
+        upload.save(temporary)
+        if os.path.getsize(temporary) > 50 * 1024 * 1024:
+            raise ValueError('ZIP file must be 50 MB or smaller')
+        return jsonify(_static_site_helper('deploy', temporary, timeout=120))
+    except ValueError as error:
+        return jsonify({'success': False, 'message': str(error)}), 400
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500
+    finally:
+        try:
+            os.remove(temporary)
+        except FileNotFoundError:
+            pass
 
 # User Panel Access Control
 @settings_bp.route('/api/user-panel/status', methods=['GET'])

@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/variables.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/footer.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css', v='20260926-2fa-v1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css', v='20260926-static-site-v1') }}">
     
     <style>
         [dir="rtl"] body {
@@ -241,13 +241,15 @@
                             <h3>{{ _('Static Website') }}</h3>
                             <p>{{ _('Upload and manage static website') }}</p>
                         </div>
+                        <div class="status-badge inactive" id="staticSiteStatusBadge"><i class="fas fa-circle"></i> No website</div>
                     </div>
                     <div class="card-body">
-                        <div class="upload-zone" id="uploadZone">
+                        <div class="upload-zone static-site-drop-zone" id="uploadZone">
                             <i class="fas fa-cloud-upload-alt"></i>
                             <p>{{ _('Drag and drop ZIP file or click to browse') }}</p>
                             <input type="file" id="fileInput" accept=".zip" hidden>
-                            <button class="btn-upload" onclick="document.getElementById('fileInput').click()">
+                            <small id="staticSiteDetails">ZIP must contain index.html · Maximum 50 MB</small>
+                            <button class="btn-upload" type="button" onclick="event.stopPropagation(); document.getElementById('fileInput').click()">
                                 {{ _('Choose File') }}
                             </button>
                         </div>
@@ -323,6 +325,6 @@
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/settings.js', v='20260926-2fa-v1') }}"></script>
+    <script src="{{ url_for('static', filename='js/settings.js', v='20260926-static-site-v1') }}"></script>
 </body>
 </html>

@@ -57,6 +57,7 @@ function handleToggleChange(e) {
 async function loadSettings() {
     await loadSSLStatus();
     await loadTwoFactorStatus();
+    await loadStaticSiteStatus();
     try {
         const response = await fetch('api/user-panel/status', { headers: { Accept: 'application/json' } });
         const data = await response.json();
@@ -263,40 +264,56 @@ function handleFileDrop(e) {
     }
 }
 
-function uploadFile(file) {
-    console.log('Uploading file:', file.name);
-    
-    // Show upload progress (mock)
+async function loadStaticSiteStatus() {
+    try {
+        const response = await fetch('api/static-site/status', {headers:{Accept:'application/json'}});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Unable to load website status');
+        const badge = document.getElementById('staticSiteStatusBadge');
+        const details = document.getElementById('staticSiteDetails');
+        badge.classList.toggle('active', Boolean(data.installed));
+        badge.classList.toggle('inactive', !data.installed);
+        badge.innerHTML = `<i class="fas fa-circle"></i> ${data.installed ? 'Published' : 'No website'}`;
+        details.textContent = data.installed
+            ? `${data.file_count || 0} files · ${formatBytes(data.size || 0)} · Opens at the IP/domain root`
+            : 'ZIP must contain index.html · Maximum 50 MB';
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
+}
+
+function bindStaticUpload() {
+    const fileInput = document.getElementById('fileInput');
+    const uploadZone = document.getElementById('uploadZone');
+    fileInput?.addEventListener('change', handleFileSelect);
+    uploadZone?.addEventListener('dragover', handleDragOver);
+    uploadZone?.addEventListener('drop', handleFileDrop);
+    uploadZone?.addEventListener('dragleave', handleDragLeave);
+}
+
+async function uploadFile(file) {
+    if (!file.name.toLowerCase().endsWith('.zip')) return showNotification('Please choose a ZIP file', 'error');
     const uploadZone = document.getElementById('uploadZone');
     const originalContent = uploadZone.innerHTML;
-    
     uploadZone.innerHTML = `
         <i class="fas fa-spinner fa-spin"></i>
-        <p>Uploading ${file.name}...</p>
-        <div style="width: 80%; height: 8px; background: var(--border); border-radius: 4px; margin: 16px auto;">
-            <div id="uploadProgress" style="width: 0%; height: 100%; background: var(--primary); border-radius: 4px; transition: width 0.3s;"></div>
-        </div>
+        <p>Validating and publishing ${escapeSettingHtml(file.name)}…</p>
+        <small>Existing website stays online until deployment is complete.</small>
     `;
-    
-    // Simulate upload progress
-    let progress = 0;
-    const interval = setInterval(() => {
-        progress += 10;
-        const progressBar = document.getElementById('uploadProgress');
-        if (progressBar) {
-            progressBar.style.width = progress + '%';
-        }
-        
-        if (progress >= 100) {
-            clearInterval(interval);
-            setTimeout(() => {
-                uploadZone.innerHTML = originalContent;
-                showNotification('File uploaded successfully', 'success');
-            }, 500);
-        }
-    }, 200);
-    
-    // TODO: Implement actual file upload
+    try {
+        const form = new FormData();
+        form.append('website', file);
+        const response = await fetch('api/static-site/upload', {method:'POST', headers:{Accept:'application/json'}, body:form});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Website upload failed');
+        showNotification(data.message || 'Static website published', 'success');
+    } catch (error) {
+        showNotification(error.message, 'error');
+    } finally {
+        uploadZone.innerHTML = originalContent;
+        bindStaticUpload();
+        await loadStaticSiteStatus();
+    }
 }
 
 // Telegram backup

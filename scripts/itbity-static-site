@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Safely deploy a static website ZIP for the IT Bity landing page."""
+import datetime, json, os, shutil, stat, subprocess, sys, tempfile, zipfile
+from pathlib import Path, PurePosixPath
+
+SITE_ROOT = Path('/var/www/itbity-static-site')
+STATE_FILE = Path('/etc/itbity-static-site.json')
+NGINX_SITE = Path('/etc/nginx/sites-available/itbity-ssh-panel')
+MAX_FILES = 5000
+MAX_UNCOMPRESSED = 250 * 1024 * 1024
+BLOCKED_SUFFIXES = {'.php', '.phar', '.py', '.pyc', '.sh', '.bash', '.pl', '.cgi', '.fcgi', '.so', '.dll', '.exe'}
+
+def emit(success, **data): print(json.dumps({'success': success, **data}))
+
+def safe_parts(name):
+    path = PurePosixPath(name.replace('\\', '/'))
+    if path.is_absolute() or '..' in path.parts or any(':' in p or '\x00' in p for p in path.parts):
+        raise ValueError(f'Unsafe path in ZIP: {name}')
+    return [p for p in path.parts if p not in ('', '.')]
+
+def validate_archive(archive):
+    with zipfile.ZipFile(archive) as bundle:
+        files = [item for item in bundle.infolist() if not item.is_dir()]
+        total = sum(item.file_size for item in files)
+        if not files or len(files) > MAX_FILES: raise ValueError('ZIP is empty or contains too many files')
+        if total > MAX_UNCOMPRESSED: raise ValueError('Uncompressed website is larger than 250 MB')
+        indexes = []
+        for item in files:
+            parts = safe_parts(item.filename)
+            if stat.S_ISLNK(item.external_attr >> 16): raise ValueError('Symbolic links are not allowed')
+            if Path(parts[-1]).suffix.lower() in BLOCKED_SUFFIXES: raise ValueError(f'Executable/server-side file is not allowed: {parts[-1]}')
+            if parts[-1].lower() == 'index.html': indexes.append(parts)
+        if not indexes: raise ValueError('The ZIP must contain an index.html file')
+        indexes.sort(key=lambda value: (len(value), '/'.join(value)))
+        return indexes[0][:-1], len(files), total
+
+def enable_nginx():
+    text = NGINX_SITE.read_text()
+    if '# IT Bity static website' not in text:
+        closing = text.rfind('}')
+        if closing < 0: raise ValueError('Invalid Nginx panel configuration')
+        block = '''\n    # IT Bity static website\n    root /var/www/itbity-static-site;\n    index index.html;\n\n    location / {\n        try_files $uri $uri/ =404;\n    }\n'''
+        NGINX_SITE.write_text(text[:closing] + block + text[closing:])
+    result = subprocess.run(['/usr/sbin/nginx', '-t'], capture_output=True, text=True)
+    if result.returncode: raise RuntimeError(result.stderr.strip() or 'Nginx validation failed')
+    subprocess.run(['/usr/bin/systemctl', 'reload', 'nginx'], check=True)
+
+def deploy(archive):
+    archive = Path(archive).resolve()
+    if archive.parent != Path('/tmp') or not archive.name.startswith('itbity-static-') or archive.suffix.lower() != '.zip':
+        raise ValueError('Invalid temporary upload name')
+    prefix, file_count, total = validate_archive(archive)
+    SITE_ROOT.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix='.itbity-static-', dir=str(SITE_ROOT.parent)))
+    candidate, backup = staging.joinpath(*prefix), SITE_ROOT.with_name('.itbity-static-previous')
+    try:
+        with zipfile.ZipFile(archive) as bundle:
+            for item in bundle.infolist():
+                parts = safe_parts(item.filename)
+                if not parts: continue
+                target = staging.joinpath(*parts)
+                if item.is_dir(): target.mkdir(parents=True, exist_ok=True); continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with bundle.open(item) as source, target.open('wb') as output: shutil.copyfileobj(source, output)
+                target.chmod(0o644)
+        for path in staging.rglob('*'):
+            if path.is_dir(): path.chmod(0o755)
+        if not (candidate / 'index.html').is_file(): raise ValueError('Unable to locate index.html after extraction')
+        candidate.chmod(0o755)
+        shutil.rmtree(backup, ignore_errors=True)
+        if SITE_ROOT.exists(): os.replace(SITE_ROOT, backup)
+        os.replace(candidate, SITE_ROOT)
+        shutil.rmtree(backup, ignore_errors=True)
+        deployed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        STATE_FILE.write_text(json.dumps({'deployed_at': deployed_at, 'file_count': file_count, 'size': total}) + '\n')
+        STATE_FILE.chmod(0o644)
+        return {'installed': True, 'deployed_at': deployed_at, 'file_count': file_count, 'size': total}
+    except Exception:
+        if not SITE_ROOT.exists() and backup.exists(): os.replace(backup, SITE_ROOT)
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True); archive.unlink(missing_ok=True)
+
+def status_info():
+    try: data = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
+    except (OSError, json.JSONDecodeError): data = {}
+    return ({'installed': True, **data} if (SITE_ROOT / 'index.html').is_file() else {'installed': False})
+
+def main():
+    try:
+        command = sys.argv[1] if len(sys.argv) > 1 else ''
+        if command == 'status': emit(True, **status_info())
+        elif command == 'deploy' and len(sys.argv) == 3:
+            enable_nginx(); emit(True, message='Static website published successfully', **deploy(sys.argv[2]))
+        elif command == 'enable-nginx': enable_nginx(); emit(True, message='Static website routing enabled')
+        else: raise ValueError('Invalid static-site command')
+    except Exception as error:
+        emit(False, message=str(error)); raise SystemExit(1)
+
+if __name__ == '__main__': main()
