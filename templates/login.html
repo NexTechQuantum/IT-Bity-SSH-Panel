@@ -27,6 +27,7 @@
             <form id="loginForm" method="post" action="{{ url_for('auth.login') }}" class="portal-login-form">
                 <label>{{ _('Username') }}<div class="portal-input"><i class="fas fa-user-shield"></i><input id="username" name="username" autocomplete="username" required></div></label>
                 <label>{{ _('Password') }}<div class="portal-input"><i class="fas fa-lock"></i><input id="password" name="password" type="password" autocomplete="current-password" required><button type="button" class="inline-password-toggle" id="togglePassword"><i class="fas fa-eye"></i></button></div></label>
+                <label>Authentication code <small>(if enabled)</small><div class="portal-input"><i class="fas fa-shield-halved"></i><input name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000"></div></label>
                 <label class="portal-remember"><input type="checkbox" name="remember"> {{ _('Remember me') }}</label>
                 <button type="submit" class="portal-primary-button">{{ _('Login to Panel') }} <i class="fas fa-arrow-right"></i></button>
             </form>

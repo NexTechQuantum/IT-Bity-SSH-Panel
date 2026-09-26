@@ -28,6 +28,7 @@
             <form method="post" class="portal-login-form">
                 <label>Username<div class="portal-input"><i class="fas fa-user"></i><input name="username" autocomplete="username" required></div></label>
                 <label>Password<div class="portal-input"><i class="fas fa-lock"></i><input name="password" type="password" autocomplete="current-password" required></div></label>
+                {% if show_otp %}<label>Authentication code<div class="portal-input"><i class="fas fa-shield-halved"></i><input name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000"></div></label>{% endif %}
                 <label class="portal-remember"><input type="checkbox" name="remember"> Remember me</label>
                 <button type="submit" class="portal-primary-button">Sign in <i class="fas fa-arrow-right"></i></button>
             </form>

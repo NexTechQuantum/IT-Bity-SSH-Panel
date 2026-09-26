@@ -3,6 +3,7 @@ from flask_babel import gettext as _
 from flask_login import login_user, logout_user, login_required, current_user
 from app import db
 from app.models import AppSetting, User
+from app.two_factor import enabled as two_factor_enabled, verify as verify_2fa
 from datetime import datetime
 
 auth_bp = Blueprint('auth', __name__)
@@ -20,11 +21,15 @@ def login():
     username = request.form.get('username')
     password = request.form.get('password')
     remember = request.form.get('remember', False)
+    otp = request.form.get('otp', '').strip()
     
     user = User.query.filter_by(username=username, role='admin').first()
     
     if user:
         if user.check_password(password):
+            if two_factor_enabled(user) and not verify_2fa(user, otp):
+                flash(_('Enter a valid two-factor authentication code.'), 'error')
+                return redirect(url_for('auth.login_page'))
             login_user(user, remember=remember)
             
             user.last_login = datetime.utcnow()

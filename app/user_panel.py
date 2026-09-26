@@ -2,7 +2,7 @@ from datetime import datetime, time
 from functools import wraps
 import subprocess
 
-from flask import Blueprint, Response, abort, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, flash, jsonify, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
@@ -10,6 +10,7 @@ from app.models import AppSetting, RecommendedApp, SupportTicket, User, UserIPSe
 from app.user_mgmt.linux import reset_linux_password
 from app.user_mgmt.services.telemetry.connections import get_conns
 from app.user_mgmt.services.wireguard import get_client_config
+from app.two_factor import activate as activate_2fa, enabled as two_factor_enabled, enforced_for_users, provisioning, verify as verify_2fa
 
 
 user_panel_bp = Blueprint('user_panel', __name__)
@@ -47,17 +48,37 @@ def login_page():
             return redirect(url_for('main.dashboard'))
 
     if request.method == 'POST':
+        pending_id = session.get('pending_2fa_user_id')
+        if pending_id and request.form.get('otp'):
+            pending = db.session.get(User, int(pending_id))
+            if pending and activate_2fa(pending, request.form.get('otp', '')):
+                session.pop('pending_2fa_user_id', None)
+                login_user(pending, remember=bool(session.pop('pending_2fa_remember', False)))
+                pending.last_login = datetime.utcnow(); db.session.commit()
+                return redirect(url_for('user_panel.dashboard'))
+            flash('Invalid authentication code.', 'error')
+            if pending:
+                _, qr = provisioning(pending)
+                return render_template('two_factor_enroll.html', qr=qr, username=pending.username)
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         user = User.query.filter_by(username=username, role='user', is_active=True).first()
         if user and user.check_password(password):
+            if enforced_for_users() and not two_factor_enabled(user):
+                session['pending_2fa_user_id'] = user.id
+                session['pending_2fa_remember'] = bool(request.form.get('remember'))
+                _, qr = provisioning(user)
+                return render_template('two_factor_enroll.html', qr=qr, username=user.username)
+            if two_factor_enabled(user) and not verify_2fa(user, request.form.get('otp', '')):
+                flash('Enter a valid two-factor authentication code.', 'error')
+                return render_template('user_login.html', panel_enabled=True, show_otp=True)
             login_user(user, remember=bool(request.form.get('remember')))
             user.last_login = datetime.utcnow()
             db.session.commit()
             return redirect(url_for('user_panel.dashboard'))
         flash('Invalid username or password.', 'error')
 
-    return render_template('user_login.html', panel_enabled=panel_enabled())
+    return render_template('user_login.html', panel_enabled=panel_enabled(), show_otp=enforced_for_users())
 
 
 @user_panel_bp.route('/logout')

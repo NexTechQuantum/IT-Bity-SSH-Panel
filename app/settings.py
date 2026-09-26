@@ -8,6 +8,7 @@ import subprocess
 import uuid
 from app import db
 from app.models import AppSetting, RecommendedApp, ensure_default_recommended_apps
+from app.two_factor import activate as activate_2fa, disable as disable_2fa, enabled as two_factor_enabled, enforced_for_users, provisioning, set_enforced
 
 settings_bp = Blueprint('settings', __name__)
 
@@ -164,19 +165,41 @@ def update_wireguard_config():
 @login_required
 @admin_required
 def get_2fa_status():
-    """Get 2FA status - TODO: Implement"""
-    return jsonify({
-        'success': True,
-        'enabled': False,
-        'enforced': False
-    })
+    return jsonify({'success': True, 'enabled': two_factor_enabled(current_user), 'enforced': enforced_for_users()})
+
+@settings_bp.route('/api/2fa/setup', methods=['POST'])
+@login_required
+@admin_required
+def setup_2fa():
+    uri, qr = provisioning(current_user)
+    return jsonify({'success': True, 'qr': qr, 'secret': uri.split('secret=', 1)[1].split('&', 1)[0]})
+
+@settings_bp.route('/api/2fa/verify', methods=['POST'])
+@login_required
+@admin_required
+def verify_2fa_setup():
+    code = str((request.get_json(silent=True) or {}).get('code', '')).strip()
+    if not activate_2fa(current_user, code):
+        return jsonify({'success': False, 'message': 'Invalid authentication code'}), 400
+    return jsonify({'success': True, 'enabled': True})
 
 @settings_bp.route('/api/2fa/toggle', methods=['POST'])
 @login_required
 @admin_required
 def toggle_2fa():
-    """Toggle 2FA - TODO: Implement"""
-    return jsonify({'success': False, 'message': 'Not implemented yet'}), 501
+    payload = request.get_json(silent=True) or {}
+    action = payload.get('action')
+    if action == 'disable':
+        if not current_user.check_password(str(payload.get('password', ''))):
+            return jsonify({'success': False, 'message': 'Administrator password is incorrect'}), 403
+        disable_2fa(current_user)
+        return jsonify({'success': True, 'enabled': False})
+    if action == 'enforce':
+        if not two_factor_enabled(current_user):
+            return jsonify({'success': False, 'message': 'Enable administrator 2FA first'}), 400
+        set_enforced(bool(payload.get('enabled')))
+        return jsonify({'success': True, 'enforced': enforced_for_users()})
+    return jsonify({'success': False, 'message': 'Invalid 2FA action'}), 400
 
 # Static Website Upload
 @settings_bp.route('/api/static-site/upload', methods=['POST'])

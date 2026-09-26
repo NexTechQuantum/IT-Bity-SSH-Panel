@@ -39,6 +39,9 @@ function handleToggleChange(e) {
         return;
     }
 
+    if (toggleId === 'enable2FA') { saveTwoFactorEnabled(isChecked); return; }
+    if (toggleId === 'enforce2FA') { saveTwoFactorEnforcement(isChecked); return; }
+
     // Special handling for 2FA enforce
     if (toggleId === 'enable2FA') {
         const enforce2FA = document.getElementById('enforce2FA');
@@ -53,6 +56,7 @@ function handleToggleChange(e) {
 
 async function loadSettings() {
     await loadSSLStatus();
+    await loadTwoFactorStatus();
     try {
         const response = await fetch('api/user-panel/status', { headers: { Accept: 'application/json' } });
         const data = await response.json();
@@ -89,6 +93,17 @@ let sslDomainVerified = false;
 async function loadSSLStatus() {
     try { const response = await fetch('api/ssl/status',{headers:{Accept:'application/json'}}); const data=await response.json(); if(!response.ok||!data.success) throw new Error(data.message||'Unable to read SSL status'); document.getElementById('sslServerIp').textContent=data.server_ip||'Unavailable'; if(data.domain) document.getElementById('sslDomain').value=data.domain; document.getElementById('sslAutoRenew').checked=Boolean(data.enabled); const badge=document.getElementById('sslStatusBadge'); badge.className=`status-badge ${data.enabled?'active':'inactive'}`; badge.innerHTML=`<i class="fas fa-circle"></i> ${data.enabled?'Active':'Inactive'}`; } catch(error){ document.getElementById('sslServerIp').textContent='Unavailable'; }
 }
+
+async function loadTwoFactorStatus() {
+    try { const response=await fetch('api/2fa/status'); const data=await response.json(); if(!response.ok||!data.success) throw new Error(data.message||'Unable to load 2FA status'); const enabled=Boolean(data.enabled); document.getElementById('enable2FA').checked=enabled; const enforce=document.getElementById('enforce2FA'); enforce.disabled=!enabled; enforce.checked=Boolean(data.enforced); const badge=document.getElementById('twoFactorStatusBadge'); badge.className=`status-badge ${enabled?'active':'inactive'}`; badge.innerHTML=`<i class="fas fa-circle"></i> ${enabled?'Enabled':'Disabled'}`; } catch(error){ showNotification(error.message,'error'); }
+}
+async function saveTwoFactorEnabled(value) {
+    if(value){ try{ const response=await fetch('api/2fa/setup',{method:'POST'}); const data=await response.json(); if(!response.ok||!data.success) throw new Error(data.message||'Unable to start 2FA setup'); document.getElementById('twoFactorQr').src=data.qr; document.getElementById('twoFactorSecret').textContent=data.secret; document.getElementById('twoFactorCode').value=''; document.getElementById('twoFactorModal').hidden=false; }catch(error){document.getElementById('enable2FA').checked=false;showNotification(error.message,'error');} return; }
+    const password=prompt('Enter your administrator password to disable 2FA:'); if(password===null){await loadTwoFactorStatus();return;} const response=await fetch('api/2fa/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'disable',password})}); const data=await response.json(); if(!response.ok||!data.success){showNotification(data.message||'Unable to disable 2FA','error');} await loadTwoFactorStatus();
+}
+async function verifyTwoFactorSetup(){ const code=document.getElementById('twoFactorCode').value.trim(); const response=await fetch('api/2fa/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})}); const data=await response.json(); if(!response.ok||!data.success)return showNotification(data.message||'Invalid code','error'); document.getElementById('twoFactorModal').hidden=true; await loadTwoFactorStatus(); showNotification('Two-factor authentication enabled','success'); }
+async function cancelTwoFactorSetup(){ document.getElementById('twoFactorModal').hidden=true; await loadTwoFactorStatus(); }
+async function saveTwoFactorEnforcement(enabled){ const response=await fetch('api/2fa/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'enforce',enabled})}); const data=await response.json(); if(!response.ok||!data.success)showNotification(data.message||'Unable to update enforcement','error'); await loadTwoFactorStatus(); }
 async function checkSSLDomain() {
     const domain=document.getElementById('sslDomain').value.trim(); const button=document.getElementById('sslCheckButton'); const result=document.getElementById('sslCheckResult'); sslDomainVerified=false; document.getElementById('installSSLButton').disabled=true; button.disabled=true;
     try { const response=await fetch('api/ssl/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})}); const data=await response.json(); if(!response.ok||!data.success) throw new Error(data.message||'DNS check failed'); sslDomainVerified=Boolean(data.matches); result.hidden=false; result.className=`ssl-check-result ${data.matches?'success':'error'}`; result.innerHTML=data.matches?`<i class="fas fa-circle-check"></i><span><strong>DNS is correct</strong>${escapeSettingHtml(domain)} points to ${escapeSettingHtml(data.server_ip)}</span>`:`<i class="fas fa-triangle-exclamation"></i><span><strong>DNS does not match</strong>Domain: ${data.resolved_ips.join(', ')||'No IPv4'} · Server: ${data.server_ip}</span>`; document.getElementById('installSSLButton').disabled=!data.matches; } catch(error){ result.hidden=false; result.className='ssl-check-result error'; result.textContent=error.message; } finally { button.disabled=false; }
