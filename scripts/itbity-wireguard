@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""Restricted root helper for IT Bity WireGuard peer management."""
+
+import base64
+import ipaddress
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+STATE_DIR = '/etc/itbity-wireguard'
+PEER_DIR = f'{STATE_DIR}/peers'
+STATE_FILE = f'{STATE_DIR}/state.json'
+WG_DIR = '/etc/wireguard'
+WG_CONFIG = f'{WG_DIR}/wg0.conf'
+PRIVATE_KEY_FILE = f'{STATE_DIR}/server_private.key'
+NETWORK = ipaddress.ip_network('10.66.66.0/24')
+
+
+def result(success, message, **data):
+    print(json.dumps({'success': success, 'message': message, **data}))
+
+
+def run(command, *, input_text=None, check=True):
+    return subprocess.run(
+        command, input=input_text, capture_output=True, text=True,
+        timeout=15, check=check,
+    )
+
+
+def atomic_write(path, content, mode=0o600):
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix='.itbity-', dir=os.path.dirname(path))
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def default_state():
+    return {'enabled': False, 'endpoint': '', 'port': 51820, 'dns': '1.1.1.1'}
+
+
+def load_state():
+    try:
+        with open(STATE_FILE, encoding='utf-8') as handle:
+            return {**default_state(), **json.load(handle)}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return default_state()
+
+
+def save_state(state):
+    atomic_write(STATE_FILE, json.dumps(state, indent=2) + '\n')
+
+
+def valid_key(value):
+    try:
+        return len(base64.b64decode(value, validate=True)) == 32
+    except Exception:
+        return False
+
+
+def server_keys():
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    if not os.path.exists(PRIVATE_KEY_FILE):
+        private_key = run(['/usr/bin/wg', 'genkey']).stdout.strip()
+        if not valid_key(private_key):
+            raise RuntimeError('WireGuard generated an invalid server key')
+        atomic_write(PRIVATE_KEY_FILE, private_key + '\n')
+    with open(PRIVATE_KEY_FILE, encoding='utf-8') as handle:
+        private_key = handle.read().strip()
+    public_key = run(['/usr/bin/wg', 'pubkey'], input_text=private_key + '\n').stdout.strip()
+    return private_key, public_key
+
+
+def peer_path(user_id):
+    return f'{PEER_DIR}/{user_id}.json'
+
+
+def load_peers():
+    peers = []
+    os.makedirs(PEER_DIR, mode=0o700, exist_ok=True)
+    for name in sorted(os.listdir(PEER_DIR)):
+        if not name.endswith('.json'):
+            continue
+        try:
+            with open(os.path.join(PEER_DIR, name), encoding='utf-8') as handle:
+                peer = json.load(handle)
+            if valid_key(peer.get('public_key', '')):
+                peers.append(peer)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return peers
+
+
+def save_peer(peer):
+    atomic_write(peer_path(peer['user_id']), json.dumps(peer, indent=2) + '\n')
+
+
+def load_peer(user_id):
+    try:
+        with open(peer_path(user_id), encoding='utf-8') as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return None
+
+
+def render_server_config():
+    state = load_state()
+    private_key, _ = server_keys()
+    interface = run(
+        ['/usr/sbin/ip', '-4', 'route', 'show', 'default'], check=False
+    ).stdout.split()
+    outbound = interface[interface.index('dev') + 1] if 'dev' in interface else 'eth0'
+    lines = [
+        '[Interface]',
+        'Address = 10.66.66.1/24',
+        f'ListenPort = {state["port"]}',
+        f'PrivateKey = {private_key}',
+        f'PostUp = /usr/sbin/iptables -A FORWARD -i %i -j ACCEPT; /usr/sbin/iptables -A FORWARD -o %i -j ACCEPT; /usr/sbin/iptables -t nat -A POSTROUTING -o {outbound} -j MASQUERADE',
+        f'PostDown = /usr/sbin/iptables -D FORWARD -i %i -j ACCEPT; /usr/sbin/iptables -D FORWARD -o %i -j ACCEPT; /usr/sbin/iptables -t nat -D POSTROUTING -o {outbound} -j MASQUERADE',
+    ]
+    for peer in load_peers():
+        if not peer.get('enabled', True):
+            continue
+        lines.extend([
+            '', '[Peer]', f'# User: {peer["username"]} ({peer["user_id"]})',
+            f'PublicKey = {peer["public_key"]}',
+            f'AllowedIPs = {peer["address"]}/32',
+        ])
+    os.makedirs(WG_DIR, mode=0o700, exist_ok=True)
+    atomic_write(WG_CONFIG, '\n'.join(lines) + '\n')
+
+
+def service_active():
+    return run(['/usr/bin/systemctl', 'is-active', '--quiet', 'wg-quick@wg0'], check=False).returncode == 0
+
+
+def sync_live_peer(peer, enable):
+    if not service_active():
+        return
+    command = ['/usr/bin/wg', 'set', 'wg0', 'peer', peer['public_key']]
+    if enable:
+        command += ['allowed-ips', f'{peer["address"]}/32']
+    else:
+        command += ['remove']
+    run(command)
+
+
+def configure(enabled, endpoint, port):
+    if not re.fullmatch(r'[A-Za-z0-9._:-]{1,255}', endpoint or ''):
+        raise ValueError('Endpoint must be a public IP address or hostname')
+    if not 1 <= port <= 65535:
+        raise ValueError('Port must be between 1 and 65535')
+    state = load_state()
+    state.update({'enabled': enabled, 'endpoint': endpoint, 'port': port})
+    save_state(state)
+    render_server_config()
+    run(['/usr/bin/systemctl', 'enable', 'wg-quick@wg0'], check=False)
+    action = 'restart' if enabled else 'stop'
+    service = run(['/usr/bin/systemctl', action, 'wg-quick@wg0'], check=False)
+    if enabled and service.returncode != 0:
+        raise RuntimeError(service.stderr.strip() or 'Unable to start WireGuard')
+    return state
+
+
+def create_peer(user_id, username):
+    peer = load_peer(user_id)
+    if peer:
+        peer['username'] = username
+        save_peer(peer)
+        return peer
+    used = {item['address'] for item in load_peers()}
+    address = next(
+        (str(ip) for ip in NETWORK.hosts() if str(ip) != '10.66.66.1' and str(ip) not in used),
+        None,
+    )
+    if not address:
+        raise RuntimeError('WireGuard address pool is full')
+    private_key = run(['/usr/bin/wg', 'genkey']).stdout.strip()
+    public_key = run(['/usr/bin/wg', 'pubkey'], input_text=private_key + '\n').stdout.strip()
+    peer = {
+        'user_id': user_id, 'username': username, 'address': address,
+        'private_key': private_key, 'public_key': public_key, 'enabled': True,
+    }
+    save_peer(peer)
+    render_server_config()
+    sync_live_peer(peer, True)
+    return peer
+
+
+def client_config(peer):
+    state = load_state()
+    _, server_public = server_keys()
+    if not state['endpoint']:
+        raise RuntimeError('Configure the public WireGuard endpoint first')
+    endpoint = f'[{state["endpoint"]}]' if ':' in state['endpoint'] else state['endpoint']
+    return '\n'.join([
+        '[Interface]', f'PrivateKey = {peer["private_key"]}',
+        f'Address = {peer["address"]}/32', f'DNS = {state["dns"]}', '',
+        '[Peer]', f'PublicKey = {server_public}',
+        f'Endpoint = {endpoint}:{state["port"]}',
+        'AllowedIPs = 0.0.0.0/0', 'PersistentKeepalive = 25', '',
+    ])
+
+
+def set_peer_enabled(user_id, enabled):
+    peer = load_peer(user_id)
+    if not peer:
+        raise FileNotFoundError('WireGuard peer not found')
+    peer['enabled'] = enabled
+    save_peer(peer)
+    render_server_config()
+    sync_live_peer(peer, enabled)
+    return peer
+
+
+def delete_peer(user_id):
+    peer = load_peer(user_id)
+    if not peer:
+        return
+    sync_live_peer(peer, False)
+    os.unlink(peer_path(user_id))
+    render_server_config()
+
+
+def status_payload():
+    state = load_state()
+    _, public_key = server_keys()
+    return {
+        **state, 'installed': True, 'running': service_active(),
+        'server_public_key': public_key,
+    }
+
+
+def main():
+    if os.geteuid() != 0:
+        raise PermissionError('This helper must run as root')
+    command = sys.argv[1] if len(sys.argv) > 1 else ''
+    if command == 'status' and len(sys.argv) == 2:
+        result(True, 'WireGuard status loaded', **status_payload())
+    elif command == 'configure' and len(sys.argv) == 5:
+        state = configure(sys.argv[2] == 'true', sys.argv[3], int(sys.argv[4]))
+        result(True, 'WireGuard configuration applied', **state, running=service_active())
+    elif command == 'create' and len(sys.argv) == 4:
+        peer = create_peer(int(sys.argv[2]), sys.argv[3])
+        result(True, 'WireGuard peer ready', peer={k: v for k, v in peer.items() if k != 'private_key'})
+    elif command == 'config' and len(sys.argv) == 3:
+        peer = load_peer(int(sys.argv[2]))
+        if not peer:
+            raise FileNotFoundError('WireGuard peer not found')
+        result(True, 'WireGuard client configuration loaded', config=client_config(peer))
+    elif command in ('enable', 'disable') and len(sys.argv) == 3:
+        peer = set_peer_enabled(int(sys.argv[2]), command == 'enable')
+        result(True, f'WireGuard peer {command}d', enabled=peer['enabled'])
+    elif command == 'delete' and len(sys.argv) == 3:
+        delete_peer(int(sys.argv[2]))
+        result(True, 'WireGuard peer deleted')
+    else:
+        raise ValueError('Invalid command')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        result(False, str(error))
+        sys.exit(1)

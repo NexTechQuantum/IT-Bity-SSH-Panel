@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from flask_babel import gettext as _
 from app import db
 from app.models import User, UserLimit
+from .wireguard import peer_payload, delete_peer as delete_wireguard_peer
 from ..linux import (
     get_all_linux_users, check_linux_user_exists, reset_linux_password,
     rename_linux_user, delete_linux_user
@@ -36,6 +37,7 @@ def build_users_payload():
             'sync_status': {'in_database': True, 'in_linux': linux_exists, 'synced': linux_exists},
             'linux_only': False
         }
+        data['wireguard'] = peer_payload(user.wireguard_peer) if user.role != 'admin' else None
 
         if user.limits:
             download_bytes = user.limits.download_used_bytes or 0
@@ -151,6 +153,8 @@ def delete_user_full(user_id: int):
     ok, msg = delete_linux_user(username)
     if not ok:
         return {'success': False, 'message': msg}, 500
+    if user.wireguard_peer:
+        delete_wireguard_peer(user.id)
     db.session.delete(user)
     db.session.commit()
     return {'success': True, 'message': 'User deleted successfully'}

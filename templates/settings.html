@@ -80,7 +80,7 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="setting-row">
+                        <div class="setting-row" style="display:block;">
                             <div class="setting-info">
                                 <label>{{ _('Auto-renew') }}</label>
                                 <span class="setting-desc">{{ _('Automatically renew SSL certificate') }}</span>
@@ -114,35 +114,34 @@
                                 <label>{{ _('Encryption Profile') }}</label>
                                 <span class="setting-desc">{{ _('Choose a secure OpenSSH cipher profile') }}</span>
                             </div>
-                            <select class="form-select" id="encryptionType">
+                            <select class="form-select" id="encryptionType" style="width:100%;margin-top:12px;">
                                 <option value="automatic">Automatic (Recommended)</option>
                                 <option value="modern">Modern — ChaCha20 + AES-GCM</option>
                                 <option value="compatible">Compatible — Modern + AES-CTR</option>
                             </select>
                         </div>
-                        <div class="setting-row">
+                        <div class="setting-row" style="display:block;">
                             <div class="setting-info">
                                 <label>{{ _('WireGuard UDP') }}</label>
-                                <span class="setting-desc">{{ _('Coming in the next step') }}</span>
+                                <span class="setting-desc">{{ _('Real UDP tunnel for calls and video') }}</span>
                             </div>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="sshUDP" disabled>
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="setting-row">
-                            <div class="setting-info">
-                                <label>{{ _('Compression') }}</label>
-                                <span class="setting-desc">{{ _('Enable data compression') }}</span>
+                            <div style="display:grid;grid-template-columns:minmax(0,1fr) 110px auto;gap:10px;align-items:center;margin-top:12px;">
+                                <input class="form-select" id="wireguardEndpoint" placeholder="vpn.example.com or public IP">
+                                <input class="form-select" id="wireguardPort" type="number" min="1" max="65535" value="51820">
+                                <label class="toggle-switch" title="Enable WireGuard">
+                                    <input type="checkbox" id="sshUDP">
+                                    <span class="toggle-slider"></span>
+                                </label>
                             </div>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="sshCompression">
-                                <span class="toggle-slider"></span>
-                            </label>
+                            <div id="wireguardStatus" class="setting-desc" style="margin-top:8px;"></div>
                         </div>
                         <button class="btn-action" id="saveSSHButton" onclick="saveSSHConfig()">
                             <i class="fas fa-save"></i>
                             {{ _('Save Configuration') }}
+                        </button>
+                        <button class="btn-action" id="saveWireGuardButton" onclick="saveWireGuardConfig()" style="margin-top:10px;">
+                            <i class="fas fa-shield-halved"></i>
+                            {{ _('Save WireGuard Configuration') }}
                         </button>
                     </div>
                 </div>
@@ -279,6 +278,6 @@
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/settings.js', v='20260925-ssh-profile-v1') }}"></script>
+    <script src="{{ url_for('static', filename='js/settings.js', v='20260926-wireguard-v1') }}"></script>
 </body>
 </html>

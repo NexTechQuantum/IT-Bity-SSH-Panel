@@ -35,6 +35,11 @@ class User(UserMixin, db.Model):
         cascade='all, delete-orphan'
     )
 
+    wireguard_peer = db.relationship(
+        'WireGuardPeer', backref='user', uselist=False,
+        cascade='all, delete-orphan'
+    )
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
     
@@ -130,3 +135,23 @@ class UserIPSession(db.Model):
 
     def __repr__(self):
         return f'<UserIPSession user_id={self.user_id} ip={self.ip_address}>'
+
+
+class WireGuardPeer(db.Model):
+    __tablename__ = 'wireguard_peers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'),
+        nullable=False, unique=True, index=True,
+    )
+    public_key = db.Column(db.String(64), unique=True, nullable=False)
+    address = db.Column(db.String(45), unique=True, nullable=False)
+    enabled = db.Column(db.Boolean, default=True, nullable=False)
+    rx_bytes = db.Column(db.BigInteger, default=0, nullable=False)
+    tx_bytes = db.Column(db.BigInteger, default=0, nullable=False)
+    last_handshake_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f'<WireGuardPeer user_id={self.user_id} address={self.address}>'

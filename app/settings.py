@@ -69,17 +69,14 @@ def update_ssh_config():
     """Safely validate, apply and reload a whitelisted SSH profile."""
     payload = request.get_json(silent=True) or {}
     profile = payload.get('profile')
-    compression = payload.get('compression')
     if profile not in {'automatic', 'modern', 'compatible'}:
         return jsonify({'success': False, 'message': 'Invalid encryption profile'}), 400
-    if not isinstance(compression, bool):
-        return jsonify({'success': False, 'message': 'Compression must be true or false'}), 400
 
     try:
         result = subprocess.run(
             [
                 '/usr/bin/sudo', '/usr/local/sbin/itbity-ssh-profile', 'apply',
-                profile, 'yes' if compression else 'no',
+                profile, 'no',
             ],
             capture_output=True, text=True, timeout=15,
         )
@@ -92,6 +89,46 @@ def update_ssh_config():
         return jsonify(response)
     except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as error:
         return jsonify({'success': False, 'message': f'Unable to update SSH: {error}'}), 500
+
+
+def _wireguard_helper(*arguments):
+    result = subprocess.run(
+        ['/usr/bin/sudo', '/usr/local/sbin/itbity-wireguard', *map(str, arguments)],
+        capture_output=True, text=True, timeout=25,
+    )
+    payload = json.loads(result.stdout or '{}')
+    if result.returncode != 0 or not payload.get('success'):
+        raise RuntimeError(payload.get('message') or result.stderr.strip() or 'WireGuard operation failed')
+    return payload
+
+
+@settings_bp.route('/api/wireguard/config', methods=['GET'])
+@login_required
+@admin_required
+def get_wireguard_config():
+    try:
+        return jsonify(_wireguard_helper('status'))
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500
+
+
+@settings_bp.route('/api/wireguard/config', methods=['PUT'])
+@login_required
+@admin_required
+def update_wireguard_config():
+    payload = request.get_json(silent=True) or {}
+    enabled = payload.get('enabled')
+    endpoint = str(payload.get('endpoint', '')).strip()
+    try:
+        port = int(payload.get('port', 51820))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': 'Invalid WireGuard port'}), 400
+    if not isinstance(enabled, bool):
+        return jsonify({'success': False, 'message': 'Enabled must be true or false'}), 400
+    try:
+        return jsonify(_wireguard_helper('configure', str(enabled).lower(), endpoint, port))
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500
 
 # Two-Factor Authentication
 @settings_bp.route('/api/2fa/status', methods=['GET'])

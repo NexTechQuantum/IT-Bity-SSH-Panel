@@ -651,6 +651,9 @@ function displayUsers(users) {
           <button class="btn-action reset" onclick="resetPassword(${user.id})" title="Reset Password">
             <i class="fas fa-key"></i>
           </button>
+          <button class="btn-action view" onclick="manageWireGuard(${user.id})" title="WireGuard${user.wireguard?.exists ? ` — ${user.wireguard.enabled ? 'Active' : 'Disabled'}` : ''}">
+            <i class="fas fa-shield-halved" style="color:${user.wireguard?.exists && user.wireguard.enabled ? '#10b981' : ''};"></i>
+          </button>
           <button class="btn-action delete" onclick="deleteUser(${user.id})" title="Delete">
             <i class="fas fa-trash"></i>
           </button>`;
@@ -713,6 +716,86 @@ function formatTrafficBytes(value) {
     unit += 1;
   } while (amount >= 1024 && unit < units.length - 1);
   return `${amount.toFixed(amount >= 100 ? 0 : amount >= 10 ? 1 : 2)} ${units[unit]}`;
+}
+
+async function wireGuardAction(userId, action) {
+  const response = await fetch(`/${panelPath}/user_management/api/users/${userId}/wireguard`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) throw new Error(data.message || 'WireGuard operation failed');
+  return data;
+}
+
+async function manageWireGuard(userId) {
+  let user = allUsers.find((item) => item.id === userId);
+  if (!user) return;
+  try {
+    if (!user.wireguard?.exists) {
+      const confirmation = await Swal.fire({
+        icon: 'question', title: 'Create WireGuard Configuration?',
+        text: `A private configuration will be generated for ${user.username}.`,
+        showCancelButton: true, confirmButtonText: 'Create',
+      });
+      if (!confirmation.isConfirmed) return;
+      await wireGuardAction(userId, 'create');
+      await loadUsers();
+      user = allUsers.find((item) => item.id === userId);
+    }
+    await showWireGuardConfig(userId, user);
+  } catch (error) {
+    Swal.fire('WireGuard Error', error.message, 'error');
+  }
+}
+
+async function showWireGuardConfig(userId, user) {
+  const response = await fetch(`/${panelPath}/user_management/api/users/${userId}/wireguard/config`);
+  const data = await response.json();
+  if (!response.ok || !data.success) throw new Error(data.message || 'Could not load configuration');
+  const enabled = user?.wireguard?.enabled !== false;
+  const result = await Swal.fire({
+    title: `WireGuard — ${escapeHtml(user?.username || '')}`, width: 720,
+    html: `<div style="text-align:left;">
+      <p><strong>Address:</strong> ${escapeHtml(user?.wireguard?.address || '-')}</p>
+      <textarea id="wireguard-config-text" readonly style="width:100%;height:270px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #ddd;border-radius:8px;direction:ltr;">${escapeHtml(data.config)}</textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+        <button type="button" class="swal2-confirm swal2-styled" onclick="copyWireGuardConfig()"><i class="fas fa-copy"></i> Copy</button>
+        <button type="button" class="swal2-confirm swal2-styled" onclick="shareWireGuardConfig('${escapeHtml(user?.username || '')}')"><i class="fas fa-share-nodes"></i> Share</button>
+        <a class="swal2-confirm swal2-styled" style="text-decoration:none;" href="/${panelPath}/user_management/api/users/${userId}/wireguard/config?download=1"><i class="fas fa-download"></i> Download</a>
+      </div></div>`,
+    showCancelButton: true, showDenyButton: true,
+    confirmButtonText: enabled ? 'Disable Peer' : 'Enable Peer',
+    denyButtonText: 'Delete Config', cancelButtonText: 'Close',
+  });
+  if (result.isConfirmed) {
+    await wireGuardAction(userId, enabled ? 'disable' : 'enable');
+    await loadUsers();
+  } else if (result.isDenied) {
+    const confirmation = await Swal.fire({
+      icon: 'warning', title: 'Delete WireGuard configuration?',
+      text: 'The existing client configuration will stop working.',
+      showCancelButton: true, confirmButtonText: 'Delete', confirmButtonColor: '#dc3545',
+    });
+    if (confirmation.isConfirmed) {
+      await wireGuardAction(userId, 'delete');
+      await loadUsers();
+    }
+  }
+}
+
+async function copyWireGuardConfig() {
+  await writeClipboard(document.getElementById('wireguard-config-text').value);
+  Swal.showValidationMessage('Configuration copied');
+}
+
+async function shareWireGuardConfig(username) {
+  const text = document.getElementById('wireguard-config-text').value;
+  if (navigator.share) await navigator.share({ title: `WireGuard — ${username}`, text });
+  else {
+    await writeClipboard(text);
+    Swal.showValidationMessage('Configuration copied');
+  }
 }
 
 function getRoleColor(role) {

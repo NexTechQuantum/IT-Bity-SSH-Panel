@@ -1,10 +1,11 @@
 # app/user_mgmt/routes.py
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, Response
 from flask_login import login_required
 from .utils import admin_required
 from .services import (
     build_users_payload, action_repair_all, action_repair_user, action_clean_orphans,
-    action_import_linux_user, create_user_full, update_user_full, delete_user_full
+    action_import_linux_user, create_user_full, update_user_full, delete_user_full,
+    create_peer, get_client_config, set_peer_enabled, delete_peer
 )
 
 user_management_bp = Blueprint('user_management', __name__)
@@ -95,3 +96,43 @@ def delete_user(user_id):
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@user_management_bp.route('/api/users/<int:user_id>/wireguard', methods=['POST'])
+@login_required
+@admin_required
+def wireguard_action(user_id):
+    try:
+        action = (request.get_json(silent=True) or {}).get('action')
+        if action == 'create':
+            result = create_peer(user_id)
+        elif action == 'enable':
+            result = set_peer_enabled(user_id, True)
+        elif action == 'disable':
+            result = set_peer_enabled(user_id, False)
+        elif action == 'delete':
+            result = delete_peer(user_id)
+        else:
+            return jsonify({'success': False, 'message': 'Invalid WireGuard action'}), 400
+        if isinstance(result, tuple):
+            body, status = result
+            return jsonify(body), status
+        return jsonify(result)
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500
+
+
+@user_management_bp.route('/api/users/<int:user_id>/wireguard/config', methods=['GET'])
+@login_required
+@admin_required
+def wireguard_config(user_id):
+    try:
+        config, peer = get_client_config(user_id)
+        if request.args.get('download') == '1':
+            return Response(
+                config, mimetype='text/plain',
+                headers={'Content-Disposition': f'attachment; filename=itbity-{peer.user.username}.conf'},
+            )
+        return jsonify({'success': True, 'config': config})
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500

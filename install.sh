@@ -95,6 +95,7 @@ echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-
 
 # Install all monitoring tools non-interactively
 apt install -y nethogs vnstat iftop conntrack iptables-persistent
+apt install -y wireguard-tools
 
 # Enable vnstat service (for interface traffic persistence)
 systemctl enable vnstat
@@ -263,6 +264,16 @@ SSH_PROFILE_HELPER
 chmod 750 /usr/local/sbin/itbity-ssh-profile
 chown root:root /usr/local/sbin/itbity-ssh-profile
 
+# WireGuard is managed by a restricted helper. Client private keys remain in
+# /etc/itbity-wireguard (root-only) and are never stored in the panel database.
+install -o root -g root -m 750 "$SCRIPT_DIR/scripts/itbity-wireguard" /usr/local/sbin/itbity-wireguard
+mkdir -p /etc/itbity-wireguard/peers /etc/wireguard
+chmod 700 /etc/itbity-wireguard /etc/itbity-wireguard/peers /etc/wireguard
+cat > /etc/sysctl.d/60-itbity-wireguard.conf << 'WIREGUARD_SYSCTL'
+net.ipv4.ip_forward=1
+WIREGUARD_SYSCTL
+sysctl --system >/dev/null
+
 # Create or overwrite sudoers file safely
 cat > /etc/sudoers.d/itbity-panel <<'EOF'
 # ITBity Panel restricted sudo permissions for www-data
@@ -280,7 +291,8 @@ www-data ALL=(ALL) NOPASSWD: \
     /usr/bin/ss, \
     /usr/bin/ps, \
     /usr/bin/sed, \
-    /usr/local/sbin/itbity-ssh-profile
+    /usr/local/sbin/itbity-ssh-profile, \
+    /usr/local/sbin/itbity-wireguard
 EOF
 
 # Secure permissions
@@ -545,10 +557,11 @@ def get_blocked_users():
     try:
         with connection.cursor() as cursor:
             cursor.execute("""
-                SELECT u.username, u.is_active, ul.expires_at,
-                       ul.traffic_limit_gb, ul.download_used_bytes
+                SELECT u.id, u.username, u.is_active, ul.expires_at,
+                       ul.traffic_limit_gb, ul.download_used_bytes, wp.id
                 FROM users u
                 JOIN user_limits ul ON ul.user_id = u.id
+                LEFT JOIN wireguard_peers wp ON wp.user_id = u.id
                 WHERE u.role <> 'admin'
                   AND (u.is_active = 0
                        OR ul.expires_at <= UTC_TIMESTAMP()
@@ -582,11 +595,33 @@ def disconnect_user(username, reason):
         log(f'ERROR: failed to disconnect {username}: {result.stderr.strip()}')
 
 
+def disable_wireguard(user_id, peer_id, username, reason):
+    if peer_id is None:
+        return
+    result = subprocess.run(
+        ['/usr/local/sbin/itbity-wireguard', 'disable', str(user_id)],
+        capture_output=True, text=True, timeout=5,
+    )
+    if result.returncode == 0:
+        env = load_env()
+        connection = pymysql.connect(
+            host=env.get('DB_HOST', 'localhost'), user=env['DB_USER'],
+            password=env['DB_PASSWORD'], database=env['DB_NAME'],
+            charset='utf8mb4', autocommit=True,
+        )
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute('UPDATE wireguard_peers SET enabled=0 WHERE id=%s', (peer_id,))
+        finally:
+            connection.close()
+        log(f'WIREGUARD DISABLED: {username}; reason={reason}')
+
+
 def main():
     log('Access enforcer started')
     while True:
         try:
-            for username, is_active, expires_at, traffic_limit_gb, download_used_bytes in get_blocked_users():
+            for user_id, username, is_active, expires_at, traffic_limit_gb, download_used_bytes, peer_id in get_blocked_users():
                 if not is_active:
                     reason = 'inactive'
                 elif expires_at is not None and datetime.utcnow() >= expires_at:
@@ -594,6 +629,7 @@ def main():
                 else:
                     reason = f'download_quota={download_used_bytes}/{traffic_limit_gb}_GiB'
                 disconnect_user(username, reason)
+                disable_wireguard(user_id, peer_id, username, reason)
         except Exception as error:
             log(f'ERROR: {error}')
         time.sleep(POLL_SECONDS)
@@ -1010,12 +1046,36 @@ def pid_users(pids):
     return users
 
 
+def wireguard_snapshot():
+    result = subprocess.run(
+        ["/usr/bin/wg", "show", "wg0", "dump"],
+        capture_output=True, text=True, timeout=5,
+    )
+    if result.returncode != 0:
+        return []
+    peers = []
+    for index, line in enumerate(result.stdout.splitlines()):
+        if index == 0:
+            continue
+        fields = line.split("\t")
+        if len(fields) < 8:
+            continue
+        peers.append({
+            "public_key": fields[0],
+            "last_handshake": int(fields[4] or 0),
+            "upload": int(fields[5] or 0),
+            "download": int(fields[6] or 0),
+        })
+    return peers
+
+
 def main_loop():
     log("TCP traffic daemon started")
 
     while True:
         try:
             sockets = socket_snapshot()
+            wireguard_peers = wireguard_snapshot()
             conn = db()
             try:
                 with conn.cursor() as cur:
@@ -1088,6 +1148,37 @@ def main_loop():
                         cur.execute(
                             "UPDATE user_ip_sessions SET closed_at=NOW() WHERE closed_at IS NULL"
                         )
+
+                    for item in wireguard_peers:
+                        cur.execute(
+                            """SELECT id, user_id, rx_bytes, tx_bytes
+                               FROM wireguard_peers WHERE public_key=%s FOR UPDATE""",
+                            (item["public_key"],),
+                        )
+                        row = cur.fetchone()
+                        if not row:
+                            continue
+                        peer_id, user_id, old_upload, old_download = row
+                        delta_upload = (item["upload"] - old_upload
+                                        if item["upload"] >= old_upload else item["upload"])
+                        delta_download = (item["download"] - old_download
+                                          if item["download"] >= old_download else item["download"])
+                        cur.execute(
+                            """UPDATE wireguard_peers
+                               SET rx_bytes=%s, tx_bytes=%s,
+                                   last_handshake_at=IF(%s>0,FROM_UNIXTIME(%s),last_handshake_at)
+                               WHERE id=%s""",
+                            (item["upload"], item["download"], item["last_handshake"],
+                             item["last_handshake"], peer_id),
+                        )
+                        if delta_download or delta_upload:
+                            cur.execute(
+                                """UPDATE user_limits
+                                   SET download_used_bytes=download_used_bytes+%s,
+                                       upload_used_bytes=upload_used_bytes+%s
+                                   WHERE user_id=%s""",
+                                (delta_download, delta_upload, user_id),
+                            )
                 conn.commit()
             finally:
                 conn.close()

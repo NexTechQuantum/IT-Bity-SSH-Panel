@@ -51,7 +51,17 @@ async function loadSettings() {
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.message || 'Unable to load SSH settings');
         document.getElementById('encryptionType').value = data.profile || 'automatic';
-        document.getElementById('sshCompression').checked = Boolean(data.compression);
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
+    try {
+        const response = await fetch('api/wireguard/config', { headers: { Accept: 'application/json' } });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Unable to load WireGuard settings');
+        document.getElementById('sshUDP').checked = Boolean(data.enabled);
+        document.getElementById('wireguardEndpoint').value = data.endpoint || '';
+        document.getElementById('wireguardPort').value = data.port || 51820;
+        document.getElementById('wireguardStatus').textContent = data.running ? 'Running' : 'Stopped';
     } catch (error) {
         showNotification(error.message, 'error');
     }
@@ -66,18 +76,41 @@ function installSSL() {
 // SSH Configuration
 async function saveSSHConfig() {
     const profile = document.getElementById('encryptionType').value;
-    const compressionEnabled = document.getElementById('sshCompression').checked;
     const button = document.getElementById('saveSSHButton');
     button.disabled = true;
     try {
         const response = await fetch('api/ssh/config', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ profile, compression: compressionEnabled }),
+            body: JSON.stringify({ profile }),
         });
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.message || 'SSH validation failed');
         showNotification('SSH profile validated and applied', 'success');
+        await loadSettings();
+    } catch (error) {
+        showNotification(error.message, 'error');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function saveWireGuardConfig() {
+    const button = document.getElementById('saveWireGuardButton');
+    const enabled = document.getElementById('sshUDP').checked;
+    const endpoint = document.getElementById('wireguardEndpoint').value.trim();
+    const port = Number(document.getElementById('wireguardPort').value);
+    if (!endpoint) return showNotification('Enter the public server IP or hostname', 'error');
+    button.disabled = true;
+    try {
+        const response = await fetch('api/wireguard/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ enabled, endpoint, port }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'WireGuard configuration failed');
+        showNotification(`WireGuard ${enabled ? 'enabled' : 'disabled'}`, 'success');
         await loadSettings();
     } catch (error) {
         showNotification(error.message, 'error');

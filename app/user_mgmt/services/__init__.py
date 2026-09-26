@@ -5,6 +5,7 @@ from .users import (
 )
 from .linux_orphans import list_linux_only_usernames, import_linux_user, clean_orphans
 from .sync import repair_all, repair_user
+from .wireguard import create_peer, get_client_config, set_peer_enabled, delete_peer
 
 def build_users_payload():
     users_data, db_usernames, linux_usernames = _build_users_payload_core()
