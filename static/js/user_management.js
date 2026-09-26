@@ -3,6 +3,9 @@
 let allUsers = [];
 let currentFilter = 'all';
 let lastCreatedUserDetails = null;
+// The panel is installed below a randomized first URL segment. Keep it in
+// shared scope because WireGuard actions run outside loadUsers().
+const panelPath = window.location.pathname.split('/').filter(Boolean)[0] || '';
 
 document.addEventListener('DOMContentLoaded', function () {
   setupEventListeners();
