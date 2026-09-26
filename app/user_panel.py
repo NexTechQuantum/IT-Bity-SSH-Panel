@@ -28,14 +28,18 @@ def user_required(view):
             abort(403)
         if not panel_enabled():
             logout_user()
-            flash('User panel is currently unavailable.', 'warning')
-            return redirect(url_for('user_panel.login_page'))
+            return render_template('user_panel_unavailable.html'), 404
         return view(*args, **kwargs)
     return wrapped
 
 
 @user_panel_bp.route('/login', methods=['GET', 'POST'])
 def login_page():
+    if not panel_enabled():
+        if current_user.is_authenticated and current_user.role == 'user':
+            logout_user()
+        return render_template('user_panel_unavailable.html'), 404
+
     if current_user.is_authenticated:
         if current_user.role == 'user' and panel_enabled():
             return redirect(url_for('user_panel.dashboard'))
@@ -43,18 +47,15 @@ def login_page():
             return redirect(url_for('main.dashboard'))
 
     if request.method == 'POST':
-        if not panel_enabled():
-            flash('User panel is currently unavailable.', 'warning')
-        else:
-            username = request.form.get('username', '').strip()
-            password = request.form.get('password', '')
-            user = User.query.filter_by(username=username, role='user', is_active=True).first()
-            if user and user.check_password(password):
-                login_user(user, remember=bool(request.form.get('remember')))
-                user.last_login = datetime.utcnow()
-                db.session.commit()
-                return redirect(url_for('user_panel.dashboard'))
-            flash('Invalid username or password.', 'error')
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        user = User.query.filter_by(username=username, role='user', is_active=True).first()
+        if user and user.check_password(password):
+            login_user(user, remember=bool(request.form.get('remember')))
+            user.last_login = datetime.utcnow()
+            db.session.commit()
+            return redirect(url_for('user_panel.dashboard'))
+        flash('Invalid username or password.', 'error')
 
     return render_template('user_login.html', panel_enabled=panel_enabled())
 

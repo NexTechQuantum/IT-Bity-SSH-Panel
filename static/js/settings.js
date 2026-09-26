@@ -164,6 +164,7 @@ function updateUserPanelControl(enabled) {
     document.getElementById('userPanelAccess').checked = enabled;
     const badge = document.getElementById('userPanelBadge');
     badge.classList.toggle('active', enabled);
+    badge.classList.toggle('inactive', !enabled);
     badge.innerHTML = `<i class="fas fa-circle"></i> ${enabled ? 'Active' : 'Disabled'}`;
 }
 

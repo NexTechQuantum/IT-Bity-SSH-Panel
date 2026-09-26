@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, sessio
 from flask_babel import gettext as _
 from flask_login import login_user, logout_user, login_required, current_user
 from app import db
-from app.models import User
+from app.models import AppSetting, User
 from datetime import datetime
 
 auth_bp = Blueprint('auth', __name__)
@@ -11,7 +11,9 @@ auth_bp = Blueprint('auth', __name__)
 def login_page():
     if current_user.is_authenticated:
         return redirect(url_for('main.dashboard') if current_user.role == 'admin' else url_for('user_panel.dashboard'))
-    return render_template('login.html')
+    setting = db.session.get(AppSetting, 'user_panel_enabled')
+    user_panel_enabled = setting is None or setting.value == 'true'
+    return render_template('login.html', user_panel_enabled=user_panel_enabled)
 
 @auth_bp.route('/login', methods=['POST'])
 def login():

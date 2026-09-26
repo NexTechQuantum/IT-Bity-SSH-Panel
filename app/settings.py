@@ -165,7 +165,9 @@ def upload_static_site():
 @admin_required
 def user_panel_status():
     setting = db.session.get(AppSetting, 'user_panel_enabled')
-    return jsonify({'success': True, 'enabled': setting is None or setting.value == 'true'})
+    response = jsonify({'success': True, 'enabled': setting is None or setting.value == 'true'})
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @settings_bp.route('/api/user-panel/toggle', methods=['POST'])

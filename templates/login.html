@@ -35,7 +35,7 @@
                 <button type="button" onclick="copyDefaultAdmin()" title="Copy"><i class="fas fa-copy"></i></button>
                 <button type="button" onclick="applyDefaultAdmin()" title="Apply to fields"><i class="fas fa-wand-magic-sparkles"></i> Apply</button>
             </div>
-            <a class="portal-admin-link" href="{{ url_for('user_panel.login_page') }}"><i class="fas fa-user"></i> User panel login</a>
+            {% if user_panel_enabled %}<a class="portal-admin-link" href="{{ url_for('user_panel.login_page') }}"><i class="fas fa-user"></i> User panel login</a>{% endif %}
         </section>
     </main>
     <script src="{{ url_for('static', filename='js/login.js', v='20260926-admin-modern-v1') }}"></script>
