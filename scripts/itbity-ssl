@@ -67,6 +67,14 @@ def install(domain):
         subprocess.run(['/usr/sbin/nginx', '-t'], check=True, capture_output=True)
         subprocess.run(['/usr/bin/systemctl', 'enable', '--now', 'nginx'], check=True, capture_output=True)
         subprocess.run(['/usr/bin/certbot', '--nginx', '--non-interactive', '--agree-tos', '--register-unsafely-without-email', '--redirect', '-d', dns['domain']], check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as error:
+        NGINX_SITE.write_text(original)
+        subprocess.run(['/usr/sbin/nginx', '-t'], check=False, capture_output=True)
+        subprocess.run(['/usr/bin/systemctl', 'reload', 'nginx'], check=False, capture_output=True)
+        details = ((error.stderr or '') + '\n' + (error.stdout or '')).strip()
+        if 'Connection refused' in details or 'connection' in details.lower():
+            raise ValueError(f'Let\'s Encrypt cannot reach {dns["domain"]} on TCP port 80. Forward public ports 80 and 443 to this server, allow them in the firewall, then try again.')
+        raise ValueError(details[-1200:] or 'Certbot could not issue the certificate. Check /var/log/letsencrypt/letsencrypt.log')
     except Exception:
         NGINX_SITE.write_text(original)
         subprocess.run(['/usr/sbin/nginx', '-t'], check=False, capture_output=True)
