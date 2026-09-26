@@ -48,16 +48,20 @@ def secure_write(path, payload):
 def status():
     config = read_json(CONFIG_FILE)
     state = read_json(STATE_FILE)
+    schedule = config.get('schedule', 'daily:02:00')
+    if ':' in schedule and not schedule.startswith(('daily:', 'every:')):
+        schedule = f'daily:{schedule}'
     emit(True, configured=bool(config.get('token') and config.get('chat_id')),
-         schedule=config.get('schedule', '02:00'), chat_id=config.get('chat_id', ''),
+         schedule=schedule, chat_id=config.get('chat_id', ''),
          token_configured=bool(config.get('token')), last_run=state.get('last_run'),
          last_success=state.get('last_success'), last_error=state.get('last_error'),
          last_size=state.get('last_size'), running=bool(state.get('running')))
 
 
 def validate(schedule, token, chat_id):
-    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', schedule):
-        raise ValueError('Schedule must be HH:MM in server local time')
+    if not (re.fullmatch(r'daily:(?:[01]\d|2[0-3]):[0-5]\d', schedule)
+            or re.fullmatch(r'every:(?:1|2|4|8|12)', schedule)):
+        raise ValueError('Invalid backup schedule')
     if not re.fullmatch(r'\d{6,12}:[A-Za-z0-9_-]{20,}', token):
         raise ValueError('Invalid Telegram bot token')
     if not (re.fullmatch(r'-?\d{5,20}', chat_id) or re.fullmatch(r'@[A-Za-z][A-Za-z0-9_]{4,31}', chat_id)):
@@ -89,11 +93,17 @@ def configure(schedule, chat_id, token):
     validate(schedule, token, chat_id)
     test_connection({'token': token, 'chat_id': chat_id}, notify=False)
     secure_write(CONFIG_FILE, {'schedule': schedule, 'chat_id': chat_id, 'token': token})
-    hour, minute = schedule.split(':')
-    TIMER_FILE.write_text(f'''[Unit]\nDescription=Daily IT Bity full backup\n\n[Timer]\nOnCalendar=*-*-* {hour}:{minute}:00\nPersistent=true\nRandomizedDelaySec=30\nUnit=itbity-backup.service\n\n[Install]\nWantedBy=timers.target\n''')
+    if schedule.startswith('daily:'):
+        hour, minute = schedule.removeprefix('daily:').split(':')
+        timer_rule = f'OnCalendar=*-*-* {hour}:{minute}:00\nPersistent=true'
+    else:
+        hours = schedule.removeprefix('every:')
+        timer_rule = f'OnBootSec=5min\nOnUnitActiveSec={hours}h\nAccuracySec=1min'
+    TIMER_FILE.write_text(f'''[Unit]\nDescription=Scheduled IT Bity full backup\n\n[Timer]\n{timer_rule}\nRandomizedDelaySec=30\nUnit=itbity-backup.service\n\n[Install]\nWantedBy=timers.target\n''')
     os.chmod(TIMER_FILE, 0o644)
     subprocess.run(['/usr/bin/systemctl', 'daemon-reload'], check=True)
-    subprocess.run(['/usr/bin/systemctl', 'enable', '--now', 'itbity-backup.timer'], check=True, capture_output=True)
+    subprocess.run(['/usr/bin/systemctl', 'enable', 'itbity-backup.timer'], check=True, capture_output=True)
+    subprocess.run(['/usr/bin/systemctl', 'restart', 'itbity-backup.timer'], check=True, capture_output=True)
     emit(True, message='Backup schedule saved', schedule=schedule, chat_id=chat_id)
 
 
@@ -223,7 +233,7 @@ def main():
     elif command == 'run':
         run_backup()
     else:
-        raise ValueError('Usage: itbity-backup status|configure HH:MM CHAT_ID (token on stdin)|test|trigger|run')
+        raise ValueError('Usage: itbity-backup status|configure SCHEDULE CHAT_ID (token on stdin)|test|trigger|run')
 
 
 if __name__ == '__main__':

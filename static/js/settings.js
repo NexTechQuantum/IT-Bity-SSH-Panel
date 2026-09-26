@@ -275,7 +275,11 @@ async function loadBackupStatus() {
         const response = await fetch('api/backup/status', {headers:{Accept:'application/json'}});
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.message || 'Unable to load backup settings');
-        document.getElementById('backupSchedule').value = data.schedule || '02:00';
+        const schedule = data.schedule || 'daily:02:00';
+        const frequency = schedule.startsWith('every:') ? schedule : 'daily';
+        document.getElementById('backupFrequency').value = frequency;
+        document.getElementById('backupSchedule').value = schedule.startsWith('daily:') ? schedule.slice(6) : '02:00';
+        updateBackupScheduleUi();
         document.getElementById('backupChatId').value = data.chat_id || '';
         const badge = document.getElementById('backupStatusBadge');
         badge.classList.toggle('active', data.configured);
@@ -293,7 +297,9 @@ async function saveBackupConfig() {
     const button = document.getElementById('saveBackupButton');
     button.disabled = true;
     try {
-        const response = await fetch('api/backup/config', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedule:document.getElementById('backupSchedule').value,chat_id:document.getElementById('backupChatId').value.trim(),token:document.getElementById('backupToken').value.trim()})});
+        const frequency = document.getElementById('backupFrequency').value;
+        const schedule = frequency === 'daily' ? `daily:${document.getElementById('backupSchedule').value}` : frequency;
+        const response = await fetch('api/backup/config', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedule,chat_id:document.getElementById('backupChatId').value.trim(),token:document.getElementById('backupToken').value.trim()})});
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.message || 'Unable to save backup settings');
         document.getElementById('backupToken').value = '';
@@ -330,6 +336,11 @@ async function runBackupAction(buttonId, endpoint, successMessage) {
 function toggleBackupToken() {
     const input = document.getElementById('backupToken');
     input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+function updateBackupScheduleUi() {
+    const daily = document.getElementById('backupFrequency').value === 'daily';
+    document.getElementById('backupTimeField').classList.toggle('is-hidden', !daily);
 }
 
 function formatBytes(bytes) {
