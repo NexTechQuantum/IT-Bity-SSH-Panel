@@ -155,11 +155,17 @@ PROFILES = {
 }
 
 
+def ensure_sshd_runtime():
+    os.makedirs('/run/sshd', mode=0o755, exist_ok=True)
+    os.chmod('/run/sshd', 0o755)
+
+
 def output(success, message, **extra):
     print(json.dumps({'success': success, 'message': message, **extra}))
 
 
 def read_state():
+    ensure_sshd_runtime()
     profile = 'automatic'
     compression = False
     try:
@@ -189,6 +195,7 @@ def read_state():
 
 
 def apply(profile, compression):
+    ensure_sshd_runtime()
     if profile not in PROFILES or compression not in ('yes', 'no'):
         output(False, 'Invalid profile or compression value')
         return 2
@@ -272,6 +279,10 @@ SSH_PROFILE_HELPER
 
 chmod 750 /usr/local/sbin/itbity-ssh-profile
 chown root:root /usr/local/sbin/itbity-ssh-profile
+cat > /etc/tmpfiles.d/itbity-sshd.conf << 'SSHD_TMPFILES'
+d /run/sshd 0755 root root -
+SSHD_TMPFILES
+systemd-tmpfiles --create /etc/tmpfiles.d/itbity-sshd.conf
 
 # WireGuard is managed by a restricted helper. Client private keys remain in
 # /etc/itbity-wireguard (root-only) and are never stored in the panel database.
@@ -282,6 +293,16 @@ cat > /etc/sysctl.d/60-itbity-wireguard.conf << 'WIREGUARD_SYSCTL'
 net.ipv4.ip_forward=1
 WIREGUARD_SYSCTL
 sysctl --system >/dev/null
+
+# Start WireGuard with a ready-to-use default endpoint. Administrators can
+# replace this IP with a hostname later from the panel settings.
+if /usr/local/sbin/itbity-wireguard configure true "$SERVER_IP" 51820 >/tmp/itbity-wireguard-install.json 2>&1; then
+    echo -e "${GREEN}✓ WireGuard enabled on ${SERVER_IP}:51820/udp${NC}"
+else
+    echo -e "${YELLOW}⚠ WireGuard could not be started automatically${NC}"
+    cat /tmp/itbity-wireguard-install.json 2>/dev/null || true
+fi
+rm -f /tmp/itbity-wireguard-install.json
 
 # Telegram full-backup helper. Credentials and archives are root-only.
 install -o root -g root -m 750 "$SCRIPT_DIR/scripts/itbity-backup" /usr/local/sbin/itbity-backup
@@ -1543,8 +1564,9 @@ if command -v ufw &> /dev/null; then
     ufw allow 22/tcp       # SSH - CRITICAL!
     ufw allow 80/tcp       # HTTP
     ufw allow 443/tcp      # HTTPS
+    ufw allow 51820/udp    # WireGuard
     ufw --force enable 2>/dev/null || true
-    echo -e "${GREEN}✓ Firewall configured (SSH, HTTP, HTTPS allowed)${NC}"
+    echo -e "${GREEN}✓ Firewall configured (SSH, HTTP, HTTPS, WireGuard allowed)${NC}"
     ufw status numbered
 else
     echo -e "${YELLOW}⚠ UFW not found, skipping firewall configuration${NC}"
@@ -1607,6 +1629,7 @@ echo -e "${GREEN}✓${NC} Database user 'itbity' created"
 echo -e "${GREEN}✓${NC} Admin user 'ITBity' created in database"
 echo -e "${GREEN}✓${NC} Python environment configured"
 echo -e "${GREEN}✓${NC} Nginx reverse proxy configured"
+echo -e "${GREEN}✓${NC} WireGuard configured on ${SERVER_IP}:51820/udp"
 echo -e "${GREEN}✓${NC} Systemd service running"
 echo -e "${GREEN}✓${NC} Firewall configured (SSH, HTTP, HTTPS)"
 echo -e "${GREEN}✓${NC} PAM connection limits configured"
