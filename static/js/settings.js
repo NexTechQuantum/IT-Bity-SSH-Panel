@@ -60,6 +60,7 @@ async function loadSettings() {
     } catch (error) {
         showNotification(error.message, 'error');
     }
+    await loadBackupStatus();
     try {
         const response = await fetch('api/ssh/config', { headers: { Accept: 'application/json' } });
         const data = await response.json();
@@ -268,24 +269,74 @@ function uploadFile(file) {
     // TODO: Implement actual file upload
 }
 
-// Backup Functions
-function createBackup() {
-    const confirmed = confirm('Create a full system backup?\n\nThis will include:\n- Database\n- Configuration files\n- User data');
-    
-    if (confirmed) {
-        alert('Creating backup...\n\nThis feature will be implemented soon!');
-        // TODO: Implement backup creation
-        showNotification('Backup created successfully', 'success');
+// Telegram backup
+async function loadBackupStatus() {
+    try {
+        const response = await fetch('api/backup/status', {headers:{Accept:'application/json'}});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Unable to load backup settings');
+        document.getElementById('backupSchedule').value = data.schedule || '02:00';
+        document.getElementById('backupChatId').value = data.chat_id || '';
+        const badge = document.getElementById('backupStatusBadge');
+        badge.classList.toggle('active', data.configured);
+        badge.classList.toggle('inactive', !data.configured);
+        badge.innerHTML = `<i class="fas fa-circle"></i> ${data.configured ? 'Scheduled' : 'Not configured'}`;
+        const size = data.last_size ? ` · ${formatBytes(data.last_size)}` : '';
+        const result = data.running ? 'Running…' : data.last_success === true ? 'Successful' : data.last_success === false ? `Failed: ${escapeSettingHtml(data.last_error || '')}` : 'Never';
+        document.getElementById('backupLastRun').innerHTML = `<small><i class="fas fa-info-circle"></i> Last backup: ${data.last_run ? new Date(data.last_run).toLocaleString() : 'Never'} · ${result}${size}</small>`;
+    } catch (error) {
+        showNotification(error.message, 'error');
     }
 }
 
-function restoreBackup() {
-    const confirmed = confirm('Restore from backup?\n\n⚠️ WARNING: This will overwrite current data!\n\nAre you sure?');
-    
-    if (confirmed) {
-        alert('Restore from backup...\n\nThis feature will be implemented soon!');
-        // TODO: Implement backup restore
-    }
+async function saveBackupConfig() {
+    const button = document.getElementById('saveBackupButton');
+    button.disabled = true;
+    try {
+        const response = await fetch('api/backup/config', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedule:document.getElementById('backupSchedule').value,chat_id:document.getElementById('backupChatId').value.trim(),token:document.getElementById('backupToken').value.trim()})});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Unable to save backup settings');
+        document.getElementById('backupToken').value = '';
+        showNotification('Backup schedule saved', 'success');
+        await loadBackupStatus();
+    } catch (error) { showNotification(error.message, 'error'); }
+    finally { button.disabled = false; }
+}
+
+async function testBackupConnection() {
+    await runBackupAction('testBackupButton', 'api/backup/test', 'Telegram test message sent');
+}
+
+async function createBackup() {
+    if (!confirm('Create and send a full backup to the configured Telegram channel now?')) return;
+    await runBackupAction('runBackupButton', 'api/backup/create', 'Full backup started in background');
+    await loadBackupStatus();
+}
+
+async function runBackupAction(buttonId, endpoint, successMessage) {
+    const button = document.getElementById(buttonId);
+    button.disabled = true;
+    const old = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working…';
+    try {
+        const response = await fetch(endpoint, {method:'POST'});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Backup operation failed');
+        showNotification(successMessage, 'success');
+    } catch (error) { showNotification(error.message, 'error'); }
+    finally { button.disabled = false; button.innerHTML = old; }
+}
+
+function toggleBackupToken() {
+    const input = document.getElementById('backupToken');
+    input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    const units = ['B','KB','MB','GB'];
+    const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
 // Notification Helper

@@ -274,6 +274,13 @@ net.ipv4.ip_forward=1
 WIREGUARD_SYSCTL
 sysctl --system >/dev/null
 
+# Telegram full-backup helper. Credentials and archives are root-only.
+install -o root -g root -m 750 "$SCRIPT_DIR/scripts/itbity-backup" /usr/local/sbin/itbity-backup
+mkdir -p /etc/itbity-backup /var/lib/itbity-backup
+chown root:root /etc/itbity-backup /var/lib/itbity-backup
+chmod 700 /etc/itbity-backup /var/lib/itbity-backup
+install -o root -g root -m 644 "$SCRIPT_DIR/systemd/itbity-backup.service" /etc/systemd/system/itbity-backup.service
+
 # Create or overwrite sudoers file safely
 cat > /etc/sudoers.d/itbity-panel <<'EOF'
 # ITBity Panel restricted sudo permissions for www-data
@@ -295,15 +302,17 @@ www-data ALL=(ALL) NOPASSWD: \
     /usr/local/sbin/itbity-wireguard
 EOF
 
+install -o root -g root -m 440 "$SCRIPT_DIR/systemd/itbity-backup.sudoers" /etc/sudoers.d/itbity-backup
+
 # Secure permissions
 chmod 440 /etc/sudoers.d/itbity-panel
 
 # Validate sudoers syntax before proceeding
-if visudo -cf /etc/sudoers.d/itbity-panel >/dev/null 2>&1; then
+if visudo -cf /etc/sudoers.d/itbity-panel >/dev/null 2>&1 && visudo -cf /etc/sudoers.d/itbity-backup >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Sudoers file validated successfully${NC}"
 else
     echo -e "${RED}✗ Invalid sudoers file! Aborting installation.${NC}"
-    rm -f /etc/sudoers.d/itbity-panel
+    rm -f /etc/sudoers.d/itbity-panel /etc/sudoers.d/itbity-backup
     exit 1
 fi
 

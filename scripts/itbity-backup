@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""Root-only scheduled full backup sender for IT Bity Panel."""
+
+import http.client
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+from urllib.parse import quote
+from urllib.request import urlopen
+import uuid
+import zipfile
+
+CONFIG_DIR = Path('/etc/itbity-backup')
+CONFIG_FILE = CONFIG_DIR / 'config.json'
+STATE_FILE = CONFIG_DIR / 'state.json'
+BACKUP_DIR = Path('/var/lib/itbity-backup')
+PROJECT_DIR = Path('/var/www/itbity-ssh-panel')
+TIMER_FILE = Path('/etc/systemd/system/itbity-backup.timer')
+MAX_TELEGRAM_BYTES = 49 * 1024 * 1024
+
+
+def emit(success, **payload):
+    print(json.dumps({'success': success, **payload}, ensure_ascii=False))
+
+
+def read_json(path, default=None):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {} if default is None else default
+
+
+def secure_write(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    os.chmod(temporary, 0o600)
+    temporary.replace(path)
+
+
+def status():
+    config = read_json(CONFIG_FILE)
+    state = read_json(STATE_FILE)
+    emit(True, configured=bool(config.get('token') and config.get('chat_id')),
+         schedule=config.get('schedule', '02:00'), chat_id=config.get('chat_id', ''),
+         token_configured=bool(config.get('token')), last_run=state.get('last_run'),
+         last_success=state.get('last_success'), last_error=state.get('last_error'),
+         last_size=state.get('last_size'), running=bool(state.get('running')))
+
+
+def validate(schedule, token, chat_id):
+    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', schedule):
+        raise ValueError('Schedule must be HH:MM in server local time')
+    if not re.fullmatch(r'\d{6,12}:[A-Za-z0-9_-]{20,}', token):
+        raise ValueError('Invalid Telegram bot token')
+    if not (re.fullmatch(r'-?\d{5,20}', chat_id) or re.fullmatch(r'@[A-Za-z][A-Za-z0-9_]{4,31}', chat_id)):
+        raise ValueError('Invalid channel ID or @channel username')
+
+
+def telegram_json(token, method, query=''):
+    url = f'https://api.telegram.org/bot{quote(token, safe=":")}/{method}{query}'
+    with urlopen(url, timeout=25) as response:
+        payload = json.loads(response.read())
+    if not payload.get('ok'):
+        raise RuntimeError(payload.get('description', 'Telegram request failed'))
+    return payload
+
+
+def test_connection(config, notify=True):
+    bot = telegram_json(config['token'], 'getMe')['result']
+    if notify:
+        text = quote('✅ IT Bity backup connection test successful')
+        chat = quote(str(config['chat_id']))
+        telegram_json(config['token'], 'sendMessage', f'?chat_id={chat}&text={text}')
+    return bot.get('username', '')
+
+
+def configure(schedule, chat_id, token):
+    current = read_json(CONFIG_FILE)
+    if token == '__KEEP__':
+        token = current.get('token', '')
+    validate(schedule, token, chat_id)
+    test_connection({'token': token, 'chat_id': chat_id}, notify=False)
+    secure_write(CONFIG_FILE, {'schedule': schedule, 'chat_id': chat_id, 'token': token})
+    hour, minute = schedule.split(':')
+    TIMER_FILE.write_text(f'''[Unit]\nDescription=Daily IT Bity full backup\n\n[Timer]\nOnCalendar=*-*-* {hour}:{minute}:00\nPersistent=true\nRandomizedDelaySec=30\nUnit=itbity-backup.service\n\n[Install]\nWantedBy=timers.target\n''')
+    os.chmod(TIMER_FILE, 0o644)
+    subprocess.run(['/usr/bin/systemctl', 'daemon-reload'], check=True)
+    subprocess.run(['/usr/bin/systemctl', 'enable', '--now', 'itbity-backup.timer'], check=True, capture_output=True)
+    emit(True, message='Backup schedule saved', schedule=schedule, chat_id=chat_id)
+
+
+def parse_env():
+    values = {}
+    for raw in (PROJECT_DIR / '.env').read_text().splitlines():
+        raw = raw.strip()
+        if not raw or raw.startswith('#') or '=' not in raw:
+            continue
+        key, value = raw.split('=', 1)
+        values[key.strip()] = value.strip().strip('"\'')
+    return values
+
+
+def add_tree(archive, source, prefix, excluded=()):
+    if not source.exists():
+        return
+    excluded = set(excluded)
+    for path in source.rglob('*'):
+        relative = path.relative_to(source)
+        if any(part in excluded for part in relative.parts) or path.is_symlink() or not path.is_file():
+            continue
+        archive.write(path, Path(prefix) / relative)
+
+
+def create_archive():
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    work = Path(tempfile.mkdtemp(prefix='work-', dir=BACKUP_DIR))
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    archive_path = BACKUP_DIR / f'itbity-full-{socket.gethostname()}-{stamp}.zip'
+    try:
+        env = parse_env()
+        defaults = work / 'db.cnf'
+        defaults.write_text('[client]\n' + f'user={env.get("DB_USER", "itbity")}\npassword={env.get("DB_PASSWORD", "")}\nhost={env.get("DB_HOST", "localhost")}\n')
+        os.chmod(defaults, 0o600)
+        dump = work / 'database.sql'
+        dump_binary = shutil.which('mariadb-dump') or shutil.which('mysqldump')
+        if not dump_binary:
+            raise RuntimeError('mariadb-dump is not installed')
+        with dump.open('wb') as output:
+            subprocess.run([dump_binary, f'--defaults-extra-file={defaults}', '--single-transaction',
+                            '--routines', '--events', env.get('DB_NAME', 'itbitysshpanel')],
+                           stdout=output, stderr=subprocess.PIPE, check=True)
+        defaults.unlink(missing_ok=True)
+        (work / 'metadata.json').write_text(json.dumps({
+            'created_at': datetime.now(timezone.utc).isoformat(), 'hostname': socket.gethostname(),
+            'panel_version': 'git', 'format': 1,
+        }, indent=2))
+        with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+            archive.write(dump, 'database/database.sql')
+            archive.write(work / 'metadata.json', 'metadata.json')
+            add_tree(archive, PROJECT_DIR, 'panel', {'venv', '.git', '__pycache__', '.pytest_cache'})
+            add_tree(archive, Path('/etc/itbity-wireguard'), 'system/etc/itbity-wireguard')
+            add_tree(archive, Path('/etc/wireguard'), 'system/etc/wireguard')
+            for path in (Path('/etc/ssh/sshd_config'), Path('/etc/sudoers.d/itbity-panel')):
+                if path.exists():
+                    archive.write(path, f'system{path}')
+        os.chmod(archive_path, 0o600)
+        if archive_path.stat().st_size > MAX_TELEGRAM_BYTES:
+            raise RuntimeError(f'Backup is larger than Telegram 50 MB limit ({archive_path.stat().st_size} bytes)')
+        return archive_path
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def send_document(config, path):
+    boundary = '----ITBity' + uuid.uuid4().hex
+    caption = f'IT Bity full backup\nHost: {socket.gethostname()}\nCreated: {datetime.now().isoformat(timespec="seconds")}'
+    before = (f'--{boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n{config["chat_id"]}\r\n'
+              f'--{boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n{caption}\r\n'
+              f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{path.name}"\r\n'
+              f'Content-Type: application/zip\r\n\r\n').encode()
+    after = f'\r\n--{boundary}--\r\n'.encode()
+    connection = http.client.HTTPSConnection('api.telegram.org', timeout=180)
+    endpoint = f'/bot{config["token"]}/sendDocument'
+    connection.putrequest('POST', endpoint)
+    connection.putheader('Content-Type', f'multipart/form-data; boundary={boundary}')
+    connection.putheader('Content-Length', str(len(before) + path.stat().st_size + len(after)))
+    connection.endheaders()
+    connection.send(before)
+    with path.open('rb') as source:
+        while chunk := source.read(1024 * 1024):
+            connection.send(chunk)
+    connection.send(after)
+    response = connection.getresponse()
+    payload = json.loads(response.read())
+    if response.status != 200 or not payload.get('ok'):
+        raise RuntimeError(payload.get('description', f'Telegram HTTP {response.status}'))
+
+
+def run_backup():
+    config = read_json(CONFIG_FILE)
+    if not config.get('token') or not config.get('chat_id'):
+        raise RuntimeError('Telegram backup is not configured')
+    archive = None
+    state = {'last_run': datetime.now(timezone.utc).isoformat(), 'last_success': None, 'running': True}
+    secure_write(STATE_FILE, state)
+    try:
+        archive = create_archive()
+        state['last_size'] = archive.stat().st_size
+        send_document(config, archive)
+        state.update(last_success=True, last_error=None, running=False)
+        emit(True, message='Full backup sent to Telegram', size=state['last_size'])
+    except Exception as error:
+        state.update(last_success=False, last_error=str(error), running=False)
+        raise
+    finally:
+        secure_write(STATE_FILE, state)
+        if archive:
+            archive.unlink(missing_ok=True)
+
+
+def main():
+    if os.geteuid() != 0:
+        raise RuntimeError('This helper must run as root')
+    command = sys.argv[1] if len(sys.argv) > 1 else ''
+    if command == 'status':
+        status()
+    elif command == 'configure' and len(sys.argv) == 4:
+        configure(sys.argv[2], sys.argv[3], sys.stdin.read().strip() or '__KEEP__')
+    elif command == 'test':
+        config = read_json(CONFIG_FILE)
+        emit(True, message='Telegram test sent', bot=test_connection(config))
+    elif command == 'trigger':
+        subprocess.run(['/usr/bin/systemctl', 'start', '--no-block', 'itbity-backup.service'], check=True)
+        emit(True, message='Full backup started in background')
+    elif command == 'run':
+        run_backup()
+    else:
+        raise ValueError('Usage: itbity-backup status|configure HH:MM CHAT_ID (token on stdin)|test|trigger|run')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        emit(False, message=str(error))
+        sys.exit(1)

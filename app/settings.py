@@ -104,6 +104,20 @@ def _wireguard_helper(*arguments):
     return payload
 
 
+def _backup_helper(*arguments, input_text=None, timeout=30):
+    result = subprocess.run(
+        ['/usr/bin/sudo', '/usr/local/sbin/itbity-backup', *map(str, arguments)],
+        input=input_text, capture_output=True, text=True, timeout=timeout,
+    )
+    try:
+        payload = json.loads(result.stdout or '{}')
+    except json.JSONDecodeError:
+        payload = {'success': False, 'message': result.stderr.strip() or 'Invalid backup helper response'}
+    if result.returncode != 0 or not payload.get('success'):
+        raise RuntimeError(payload.get('message') or result.stderr.strip() or 'Backup operation failed')
+    return payload
+
+
 @settings_bp.route('/api/wireguard/config', methods=['GET'])
 @login_required
 @admin_required
@@ -220,12 +234,50 @@ def delete_user_panel_app(app_id):
     return jsonify({'success': True})
 
 # Backup & Restore
+@settings_bp.route('/api/backup/status', methods=['GET'])
+@login_required
+@admin_required
+def backup_status():
+    try:
+        response = jsonify(_backup_helper('status'))
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500
+
+
+@settings_bp.route('/api/backup/config', methods=['PUT'])
+@login_required
+@admin_required
+def save_backup_config():
+    payload = request.get_json(silent=True) or {}
+    schedule = str(payload.get('schedule', '')).strip()
+    chat_id = str(payload.get('chat_id', '')).strip()
+    token = str(payload.get('token', '')).strip()
+    try:
+        return jsonify(_backup_helper('configure', schedule, chat_id, input_text=token, timeout=40))
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 400
+
+
+@settings_bp.route('/api/backup/test', methods=['POST'])
+@login_required
+@admin_required
+def test_backup_connection():
+    try:
+        return jsonify(_backup_helper('test', timeout=40))
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 400
+
+
 @settings_bp.route('/api/backup/create', methods=['POST'])
 @login_required
 @admin_required
 def create_backup():
-    """Create system backup - TODO: Implement"""
-    return jsonify({'success': False, 'message': 'Not implemented yet'}), 501
+    try:
+        return jsonify(_backup_helper('trigger', timeout=20))
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500
 
 @settings_bp.route('/api/backup/restore', methods=['POST'])
 @login_required
