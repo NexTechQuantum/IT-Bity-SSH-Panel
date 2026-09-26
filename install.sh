@@ -117,7 +117,7 @@ if ! grep -q "www-data ALL=(ALL) NOPASSWD: /usr/sbin/nethogs, /usr/sbin/conntrac
 fi
 
 echo -e "${GREEN}[6/14] Installing Nginx...${NC}"
-apt install -y nginx
+apt install -y nginx certbot python3-certbot-nginx
 
 echo -e "${GREEN}[6.1/14] Configuring sudo permissions for www-data...${NC}"
 
@@ -276,6 +276,9 @@ sysctl --system >/dev/null
 
 # Telegram full-backup helper. Credentials and archives are root-only.
 install -o root -g root -m 750 "$SCRIPT_DIR/scripts/itbity-backup" /usr/local/sbin/itbity-backup
+install -o root -g root -m 750 "$SCRIPT_DIR/scripts/itbity-ssl" /usr/local/sbin/itbity-ssl
+mkdir -p /etc/itbity-ssl
+chmod 700 /etc/itbity-ssl
 mkdir -p /etc/itbity-backup /var/lib/itbity-backup
 chown root:root /etc/itbity-backup /var/lib/itbity-backup
 chmod 700 /etc/itbity-backup /var/lib/itbity-backup
@@ -303,16 +306,17 @@ www-data ALL=(ALL) NOPASSWD: \
 EOF
 
 install -o root -g root -m 440 "$SCRIPT_DIR/systemd/itbity-backup.sudoers" /etc/sudoers.d/itbity-backup
+install -o root -g root -m 440 "$SCRIPT_DIR/systemd/itbity-ssl.sudoers" /etc/sudoers.d/itbity-ssl
 
 # Secure permissions
 chmod 440 /etc/sudoers.d/itbity-panel
 
 # Validate sudoers syntax before proceeding
-if visudo -cf /etc/sudoers.d/itbity-panel >/dev/null 2>&1 && visudo -cf /etc/sudoers.d/itbity-backup >/dev/null 2>&1; then
+if visudo -cf /etc/sudoers.d/itbity-panel >/dev/null 2>&1 && visudo -cf /etc/sudoers.d/itbity-backup >/dev/null 2>&1 && visudo -cf /etc/sudoers.d/itbity-ssl >/dev/null 2>&1; then
     echo -e "${GREEN}✓ Sudoers file validated successfully${NC}"
 else
     echo -e "${RED}✗ Invalid sudoers file! Aborting installation.${NC}"
-    rm -f /etc/sudoers.d/itbity-panel /etc/sudoers.d/itbity-backup
+    rm -f /etc/sudoers.d/itbity-panel /etc/sudoers.d/itbity-backup /etc/sudoers.d/itbity-ssl
     exit 1
 fi
 

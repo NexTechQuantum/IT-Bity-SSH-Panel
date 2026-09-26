@@ -52,6 +52,7 @@ function handleToggleChange(e) {
 }
 
 async function loadSettings() {
+    await loadSSLStatus();
     try {
         const response = await fetch('api/user-panel/status', { headers: { Accept: 'application/json' } });
         const data = await response.json();
@@ -84,9 +85,17 @@ async function loadSettings() {
 }
 
 // SSL Functions
-function installSSL() {
-    alert('SSL Installation - Coming soon!\n\nThis will:\n- Request SSL certificate\n- Configure web server\n- Enable HTTPS');
-    // TODO: Implement SSL installation
+let sslDomainVerified = false;
+async function loadSSLStatus() {
+    try { const response = await fetch('api/ssl/status',{headers:{Accept:'application/json'}}); const data=await response.json(); if(!response.ok||!data.success) throw new Error(data.message||'Unable to read SSL status'); document.getElementById('sslServerIp').textContent=data.server_ip||'Unavailable'; if(data.domain) document.getElementById('sslDomain').value=data.domain; document.getElementById('sslAutoRenew').checked=Boolean(data.enabled); const badge=document.getElementById('sslStatusBadge'); badge.className=`status-badge ${data.enabled?'active':'inactive'}`; badge.innerHTML=`<i class="fas fa-circle"></i> ${data.enabled?'Active':'Inactive'}`; } catch(error){ document.getElementById('sslServerIp').textContent='Unavailable'; }
+}
+async function checkSSLDomain() {
+    const domain=document.getElementById('sslDomain').value.trim(); const button=document.getElementById('sslCheckButton'); const result=document.getElementById('sslCheckResult'); sslDomainVerified=false; document.getElementById('installSSLButton').disabled=true; button.disabled=true;
+    try { const response=await fetch('api/ssl/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})}); const data=await response.json(); if(!response.ok||!data.success) throw new Error(data.message||'DNS check failed'); sslDomainVerified=Boolean(data.matches); result.hidden=false; result.className=`ssl-check-result ${data.matches?'success':'error'}`; result.innerHTML=data.matches?`<i class="fas fa-circle-check"></i><span><strong>DNS is correct</strong>${escapeSettingHtml(domain)} points to ${escapeSettingHtml(data.server_ip)}</span>`:`<i class="fas fa-triangle-exclamation"></i><span><strong>DNS does not match</strong>Domain: ${data.resolved_ips.join(', ')||'No IPv4'} · Server: ${data.server_ip}</span>`; document.getElementById('installSSLButton').disabled=!data.matches; } catch(error){ result.hidden=false; result.className='ssl-check-result error'; result.textContent=error.message; } finally { button.disabled=false; }
+}
+async function installSSL() {
+    if(!sslDomainVerified) return showNotification('Check domain DNS first','error'); const button=document.getElementById('installSSLButton'); button.disabled=true; const old=button.innerHTML; button.innerHTML='<i class="fas fa-spinner fa-spin"></i> Installing SSL…';
+    try { const domain=document.getElementById('sslDomain').value.trim(); const response=await fetch('api/ssl/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain})}); const data=await response.json(); if(!response.ok||!data.success) throw new Error(data.message||'SSL installation failed'); showNotification('SSL installed successfully. Opening HTTPS…','success'); setTimeout(()=>location.href=`https://${domain}${location.pathname}`,1500); } catch(error){ showNotification(error.message,'error'); button.disabled=false; button.innerHTML=old; }
 }
 
 // SSH Configuration

@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+import datetime
+import ipaddress
+import json
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+STATE_DIR = Path('/etc/itbity-ssl')
+DOMAIN_FILE = STATE_DIR / 'domain'
+NGINX_SITE = Path('/etc/nginx/sites-available/itbity-ssh-panel')
+
+def output(success, **payload):
+    print(json.dumps({'success': success, **payload}))
+
+def valid_domain(value):
+    value = value.strip().lower().rstrip('.')
+    if len(value) > 253 or not re.fullmatch(r'(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}', value):
+        raise ValueError('Enter a valid domain or subdomain')
+    return value
+
+def public_ip():
+    with urllib.request.urlopen('https://api.ipify.org', timeout=8) as response:
+        return str(ipaddress.ip_address(response.read().decode().strip()))
+
+def resolved_ipv4(domain):
+    return sorted({item[4][0] for item in socket.getaddrinfo(domain, 443, socket.AF_INET, socket.SOCK_STREAM)})
+
+def check(domain):
+    domain = valid_domain(domain)
+    server_ip = public_ip()
+    addresses = resolved_ipv4(domain)
+    return {'domain': domain, 'server_ip': server_ip, 'resolved_ips': addresses, 'matches': server_ip in addresses}
+
+def status():
+    domain = DOMAIN_FILE.read_text().strip() if DOMAIN_FILE.exists() else ''
+    certificate = Path('/etc/letsencrypt/live') / domain / 'fullchain.pem' if domain else None
+    expiry = None
+    if certificate and certificate.exists():
+        result = subprocess.run(['/usr/bin/openssl', 'x509', '-enddate', '-noout', '-in', str(certificate)], capture_output=True, text=True)
+        if result.returncode == 0:
+            expiry = result.stdout.strip().removeprefix('notAfter=')
+    try:
+        server_ip = public_ip()
+    except Exception:
+        server_ip = None
+    return {'enabled': bool(certificate and certificate.exists()), 'domain': domain, 'expires_at': expiry,
+            'server_ip': server_ip, 'nginx_installed': bool(shutil.which('nginx')), 'certbot_installed': bool(shutil.which('certbot'))}
+
+def install(domain):
+    dns = check(domain)
+    if not dns['matches']:
+        raise ValueError('Domain DNS does not point to this server IP')
+    if not shutil.which('nginx') or not shutil.which('certbot'):
+        subprocess.run(['/usr/bin/apt-get', 'update'], check=True)
+        subprocess.run(['/usr/bin/apt-get', 'install', '-y', 'nginx', 'certbot', 'python3-certbot-nginx'], check=True)
+    if not NGINX_SITE.exists():
+        raise ValueError('IT Bity Nginx configuration was not found')
+    original = NGINX_SITE.read_text()
+    updated = re.sub(r'(?m)^\s*server_name\s+[^;]+;', f'    server_name {dns["domain"]};', original, count=1)
+    NGINX_SITE.write_text(updated)
+    try:
+        subprocess.run(['/usr/sbin/nginx', '-t'], check=True, capture_output=True)
+        subprocess.run(['/usr/bin/systemctl', 'enable', '--now', 'nginx'], check=True, capture_output=True)
+        subprocess.run(['/usr/bin/certbot', '--nginx', '--non-interactive', '--agree-tos', '--register-unsafely-without-email', '--redirect', '-d', dns['domain']], check=True, capture_output=True, text=True)
+    except Exception:
+        NGINX_SITE.write_text(original)
+        subprocess.run(['/usr/sbin/nginx', '-t'], check=False, capture_output=True)
+        subprocess.run(['/usr/bin/systemctl', 'reload', 'nginx'], check=False, capture_output=True)
+        raise
+    STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    DOMAIN_FILE.write_text(dns['domain'] + '\n')
+    DOMAIN_FILE.chmod(0o600)
+    subprocess.run(['/usr/bin/systemctl', 'enable', '--now', 'certbot.timer'], check=False, capture_output=True)
+    return status()
+
+try:
+    command = sys.argv[1] if len(sys.argv) > 1 else ''
+    if command == 'status': output(True, **status())
+    elif command == 'check' and len(sys.argv) == 3: output(True, **check(sys.argv[2]))
+    elif command == 'install' and len(sys.argv) == 3: output(True, **install(sys.argv[2]))
+    else: raise ValueError('Usage: itbity-ssl status|check DOMAIN|install DOMAIN')
+except Exception as error:
+    output(False, message=str(error))
+    sys.exit(1)

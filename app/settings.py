@@ -29,24 +29,35 @@ def settings_page():
     return render_template('settings.html')
 
 # SSL Certificate Management
+def _ssl_helper(*arguments, timeout=180):
+    result = subprocess.run(['/usr/bin/sudo', '/usr/local/sbin/itbity-ssl', *map(str, arguments)], capture_output=True, text=True, timeout=timeout)
+    payload = json.loads(result.stdout or '{}')
+    if result.returncode != 0 or not payload.get('success'):
+        raise RuntimeError(payload.get('message') or result.stderr.strip() or 'SSL operation failed')
+    return payload
+
 @settings_bp.route('/api/ssl/status', methods=['GET'])
 @login_required
 @admin_required
 def get_ssl_status():
-    """Get SSL certificate status - TODO: Implement"""
-    return jsonify({
-        'success': True,
-        'ssl_enabled': False,
-        'certificate_expiry': None,
-        'auto_renew': False
-    })
+    try: return jsonify(_ssl_helper('status', timeout=15))
+    except Exception as error: return jsonify({'success': False, 'message': str(error)}), 500
+
+@settings_bp.route('/api/ssl/check', methods=['POST'])
+@login_required
+@admin_required
+def check_ssl_domain():
+    domain = str((request.get_json(silent=True) or {}).get('domain', '')).strip()
+    try: return jsonify(_ssl_helper('check', domain, timeout=20))
+    except Exception as error: return jsonify({'success': False, 'message': str(error)}), 400
 
 @settings_bp.route('/api/ssl/install', methods=['POST'])
 @login_required
 @admin_required
 def install_ssl():
-    """Install SSL certificate - TODO: Implement"""
-    return jsonify({'success': False, 'message': 'Not implemented yet'}), 501
+    domain = str((request.get_json(silent=True) or {}).get('domain', '')).strip()
+    try: return jsonify(_ssl_helper('install', domain))
+    except Exception as error: return jsonify({'success': False, 'message': str(error)}), 500
 
 # SSH Configuration
 @settings_bp.route('/api/ssh/config', methods=['GET'])
