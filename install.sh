@@ -118,6 +118,15 @@ fi
 
 echo -e "${GREEN}[6/14] Installing Nginx...${NC}"
 apt install -y nginx certbot python3-certbot-nginx
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+fi
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-service=http
+    firewall-cmd --permanent --add-service=https
+    firewall-cmd --reload
+fi
 
 echo -e "${GREEN}[6.1/14] Configuring sudo permissions for www-data...${NC}"
 

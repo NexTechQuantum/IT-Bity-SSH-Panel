@@ -51,6 +51,20 @@ def status():
     return {'enabled': bool(certificate and certificate.exists()), 'domain': domain, 'expires_at': expiry,
             'server_ip': server_ip, 'nginx_installed': bool(shutil.which('nginx')), 'certbot_installed': bool(shutil.which('certbot'))}
 
+def open_firewall_ports():
+    """Open HTTP/HTTPS in an active host firewall without enabling a new firewall."""
+    if shutil.which('ufw'):
+        state = subprocess.run(['/usr/sbin/ufw', 'status'], capture_output=True, text=True)
+        if 'Status: active' in state.stdout:
+            subprocess.run(['/usr/sbin/ufw', 'allow', '80/tcp'], check=True, capture_output=True)
+            subprocess.run(['/usr/sbin/ufw', 'allow', '443/tcp'], check=True, capture_output=True)
+    if shutil.which('firewall-cmd'):
+        state = subprocess.run(['/usr/bin/firewall-cmd', '--state'], capture_output=True, text=True)
+        if state.returncode == 0:
+            subprocess.run(['/usr/bin/firewall-cmd', '--permanent', '--add-service=http'], check=True, capture_output=True)
+            subprocess.run(['/usr/bin/firewall-cmd', '--permanent', '--add-service=https'], check=True, capture_output=True)
+            subprocess.run(['/usr/bin/firewall-cmd', '--reload'], check=True, capture_output=True)
+
 def install(domain):
     dns = check(domain)
     if not dns['matches']:
@@ -58,6 +72,7 @@ def install(domain):
     if not shutil.which('nginx') or not shutil.which('certbot'):
         subprocess.run(['/usr/bin/apt-get', 'update'], check=True)
         subprocess.run(['/usr/bin/apt-get', 'install', '-y', 'nginx', 'certbot', 'python3-certbot-nginx'], check=True)
+    open_firewall_ports()
     if not NGINX_SITE.exists():
         raise ValueError('IT Bity Nginx configuration was not found')
     original = NGINX_SITE.read_text()
