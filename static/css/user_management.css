@@ -432,8 +432,155 @@
     color: #ef4444;
 }
 
+/* Compact WireGuard configuration modal */
+.wg-swal-popup {
+    padding: 1.35rem;
+}
+
+.wg-swal-content {
+    margin: 0.75rem 0 0 !important;
+    padding: 0 !important;
+}
+
+.wg-config-modal {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 18px;
+    text-align: left;
+}
+
+.wg-qr-card,
+.wg-config-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #fff;
+}
+
+.wg-qr-card {
+    padding: 14px;
+    text-align: center;
+}
+
+.wg-qr-image {
+    display: block;
+    width: 100%;
+    max-width: 192px;
+    height: auto;
+    margin: 0 auto 10px;
+}
+
+.wg-scan-hint,
+.wg-help-text,
+.wg-meta-label {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.wg-config-card {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 18px;
+}
+
+.wg-config-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.wg-meta-label {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.wg-status {
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.wg-status i { font-size: 7px; vertical-align: middle; }
+.wg-status.is-enabled { background: #e8f8f1; color: #079669; }
+.wg-status.is-disabled { background: #f1f5f9; color: #64748b; }
+
+.wg-help-text { margin: 0; line-height: 1.6; }
+
+.wg-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.wg-action-row--center { justify-content: center; margin-top: 12px; }
+
+.wg-action-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 38px;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--primary);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.wg-action-button--light {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.wg-raw-config {
+    border-top: 1px solid #e5e7eb;
+    padding-top: 12px;
+}
+
+.wg-raw-config summary {
+    color: #475569;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.wg-raw-config textarea {
+    width: 100%;
+    height: 165px;
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid #dbe2ea;
+    border-radius: 8px;
+    background: #f8fafc;
+    font-family: monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    direction: ltr;
+    resize: vertical;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
+    .wg-swal-popup { padding: 1rem; }
+
+    .wg-config-modal {
+        grid-template-columns: 1fr;
+    }
+
+    .wg-qr-image { max-width: 180px; }
+
+    .wg-config-summary { align-items: flex-start; }
+
+    .wg-action-button { flex: 1; }
+
     .page-header {
         flex-direction: column;
     }

@@ -758,21 +758,37 @@ async function showWireGuardConfig(userId, user) {
   if (!response.ok || !data.success) throw new Error(data.message || 'Could not load configuration');
   const enabled = user?.wireguard?.enabled !== false;
   const qrUrl = `/${panelPath}/user_management/api/users/${userId}/wireguard/qrcode`;
+  const username = escapeHtml(user?.username || '');
   const result = await Swal.fire({
-    title: `WireGuard — ${escapeHtml(user?.username || '')}`, width: 720,
-    html: `<div style="text-align:left;">
-      <p><strong>Address:</strong> ${escapeHtml(user?.wireguard?.address || '-')}</p>
-      <div style="display:flex;justify-content:center;margin:12px 0;">
-        <img src="${qrUrl}" alt="WireGuard QR code" style="width:min(280px,100%);height:auto;border:1px solid #e5e7eb;border-radius:12px;padding:8px;background:#fff;" loading="eager">
-      </div>
-      <textarea id="wireguard-config-text" readonly style="width:100%;height:270px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #ddd;border-radius:8px;direction:ltr;">${escapeHtml(data.config)}</textarea>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-        <button type="button" class="swal2-confirm swal2-styled" onclick="copyWireGuardConfig()"><i class="fas fa-copy"></i> Copy</button>
-        <button type="button" class="swal2-confirm swal2-styled" onclick="shareWireGuardConfig('${escapeHtml(user?.username || '')}')"><i class="fas fa-share-nodes"></i> Share</button>
-        <a class="swal2-confirm swal2-styled" style="text-decoration:none;" href="/${panelPath}/user_management/api/users/${userId}/wireguard/config?download=1"><i class="fas fa-download"></i> Download</a>
-        <a class="swal2-confirm swal2-styled" style="text-decoration:none;" href="${qrUrl}?download=1"><i class="fas fa-qrcode"></i> Download QR</a>
-        <button type="button" class="swal2-confirm swal2-styled" onclick="shareWireGuardQr(${userId}, '${escapeHtml(user?.username || '')}')"><i class="fas fa-share-nodes"></i> Share QR</button>
-      </div></div>`,
+    title: `WireGuard — ${username}`,
+    width: 780,
+    customClass: { popup: 'wg-swal-popup', htmlContainer: 'wg-swal-content' },
+    html: `<div class="wg-config-modal">
+      <section class="wg-qr-card">
+        <img src="${qrUrl}" alt="WireGuard QR code" class="wg-qr-image" loading="eager">
+        <span class="wg-scan-hint"><i class="fas fa-mobile-screen-button"></i> Scan in WireGuard app</span>
+        <div class="wg-action-row wg-action-row--center">
+          <a class="wg-action-button wg-action-button--light" href="${qrUrl}?download=1"><i class="fas fa-download"></i> QR</a>
+          <button type="button" class="wg-action-button wg-action-button--light" onclick="shareWireGuardQr(${userId}, '${username}')"><i class="fas fa-share-nodes"></i> Share</button>
+        </div>
+      </section>
+      <section class="wg-config-card">
+        <div class="wg-config-summary">
+          <div><span class="wg-meta-label">VPN address</span><strong>${escapeHtml(user?.wireguard?.address || '-')}</strong></div>
+          <span class="wg-status ${enabled ? 'is-enabled' : 'is-disabled'}"><i class="fas fa-circle"></i> ${enabled ? 'Enabled' : 'Disabled'}</span>
+        </div>
+        <p class="wg-help-text">Scan the QR code or download the configuration file to connect this device.</p>
+        <div class="wg-action-row">
+          <button type="button" class="wg-action-button" onclick="copyWireGuardConfig()"><i class="fas fa-copy"></i> Copy config</button>
+          <button type="button" class="wg-action-button" onclick="shareWireGuardConfig('${username}')"><i class="fas fa-share-nodes"></i> Share</button>
+          <a class="wg-action-button" href="/${panelPath}/user_management/api/users/${userId}/wireguard/config?download=1"><i class="fas fa-download"></i> .conf</a>
+        </div>
+        <details class="wg-raw-config">
+          <summary><i class="fas fa-code"></i> Show raw configuration</summary>
+          <textarea id="wireguard-config-text" readonly>${escapeHtml(data.config)}</textarea>
+        </details>
+      </section>
+    </div>`,
     showCancelButton: true, showDenyButton: true,
     confirmButtonText: enabled ? 'Disable Peer' : 'Enable Peer',
     denyButtonText: 'Delete Config', cancelButtonText: 'Close',
