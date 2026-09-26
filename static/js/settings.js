@@ -126,9 +126,13 @@ async function addRecommendedApp() {
     const data = await response.json();
     if (!response.ok || !data.success) return showNotification(data.message || 'Unable to add application', 'error');
     ['recommendedAppName','recommendedAppPlatform','recommendedAppUrl'].forEach(id => document.getElementById(id).value = '');
+    closeRecommendedAppModal();
     await loadRecommendedApps();
     showNotification('Application added', 'success');
 }
+
+function openRecommendedAppModal() { document.getElementById('recommendedAppModal').hidden = false; document.getElementById('recommendedAppName').focus(); }
+function closeRecommendedAppModal() { document.getElementById('recommendedAppModal').hidden = true; }
 
 async function deleteRecommendedApp(appId) {
     const response = await fetch(`api/user-panel/apps/${appId}`, {method:'DELETE'});
