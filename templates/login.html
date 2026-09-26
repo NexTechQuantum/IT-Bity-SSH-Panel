@@ -89,18 +89,10 @@
             
             <form id="loginForm" method="POST" action="{{ url_for('auth.login') }}">
                 <div class="user-type-selector mb-4">
-                    <button type="button" class="type-btn active" data-type="admin">
-                        <i class="fas fa-user-shield"></i>
-                        <span>{{ _('Admin') }}</span>
-                    </button>
-                    <button type="button" class="type-btn" data-type="user">
-                        <i class="fas fa-user"></i>
-                        <span>{{ _('User') }}</span>
+                    <button type="button" class="type-btn active" style="width:100%">
+                        <i class="fas fa-user-shield"></i><span>{{ _('Admin') }}</span>
                     </button>
                 </div>
-                
-                <input type="hidden" name="user_type" id="userType" value="admin">
-                
                 <div class="form-group mb-3">
                     <label for="username" class="form-label">
                         <i class="fas fa-user {{ 'me-2' if get_locale() == 'en' else 'ms-2' }}"></i>
@@ -152,6 +144,12 @@
                     <i class="fas fa-arrow-{{ 'left' if get_locale() == 'fa' else 'right' }} {{ 'ms-2' if get_locale() == 'fa' else 'me-2' }}"></i>
                 </button>
             </form>
+
+            <div style="text-align:center;margin-top:18px;">
+                <a href="{{ url_for('user_panel.login_page') }}" style="color:var(--primary);font-size:13px;text-decoration:none;">
+                    <i class="fas fa-user"></i> User panel login
+                </a>
+            </div>
             
             <div class="default-credentials">
                 <small>

@@ -51,11 +51,13 @@ def create_app(config_class=Config):
     from app.api import api_bp
     from app.user_management import user_management_bp
     from app.settings import settings_bp
+    from app.user_panel import user_panel_bp
     
     app.register_blueprint(main_bp, url_prefix=f'/{app.config["PANEL_PATH"]}')
     app.register_blueprint(auth_bp, url_prefix=f'/{app.config["PANEL_PATH"]}')
     app.register_blueprint(api_bp, url_prefix=f'/{app.config["PANEL_PATH"]}/api')
     app.register_blueprint(user_management_bp, url_prefix=f'/{app.config["PANEL_PATH"]}/user_management')
     app.register_blueprint(settings_bp, url_prefix=f'/{app.config["PANEL_PATH"]}/settings')
+    app.register_blueprint(user_panel_bp, url_prefix=f'/{app.config["PANEL_PATH"]}/user')
     
     return app

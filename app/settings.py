@@ -4,6 +4,8 @@ from flask_babel import gettext as _
 from functools import wraps
 import json
 import subprocess
+from app import db
+from app.models import AppSetting, RecommendedApp
 
 settings_bp = Blueprint('settings', __name__)
 
@@ -158,12 +160,62 @@ def upload_static_site():
     return jsonify({'success': False, 'message': 'Not implemented yet'}), 501
 
 # User Panel Access Control
+@settings_bp.route('/api/user-panel/status', methods=['GET'])
+@login_required
+@admin_required
+def user_panel_status():
+    setting = db.session.get(AppSetting, 'user_panel_enabled')
+    return jsonify({'success': True, 'enabled': setting is None or setting.value == 'true'})
+
+
 @settings_bp.route('/api/user-panel/toggle', methods=['POST'])
 @login_required
 @admin_required
 def toggle_user_panel():
-    """Toggle user panel access - TODO: Implement"""
-    return jsonify({'success': False, 'message': 'Not implemented yet'}), 501
+    payload = request.get_json(silent=True) or {}
+    enabled = payload.get('enabled')
+    if not isinstance(enabled, bool):
+        return jsonify({'success': False, 'message': 'Enabled must be true or false'}), 400
+    setting = db.session.get(AppSetting, 'user_panel_enabled')
+    if not setting:
+        setting = AppSetting(key='user_panel_enabled', value='true')
+        db.session.add(setting)
+    setting.value = 'true' if enabled else 'false'
+    db.session.commit()
+    return jsonify({'success': True, 'enabled': enabled})
+
+
+@settings_bp.route('/api/user-panel/apps', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def user_panel_apps():
+    if request.method == 'GET':
+        apps = RecommendedApp.query.order_by(RecommendedApp.sort_order, RecommendedApp.name).all()
+        return jsonify({'success': True, 'apps': [
+            {'id': app.id, 'name': app.name, 'platform': app.platform,
+             'download_url': app.download_url, 'is_active': app.is_active}
+            for app in apps
+        ]})
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get('name', '')).strip()
+    platform = str(payload.get('platform', '')).strip()
+    download_url = str(payload.get('download_url', '')).strip()
+    if not name or not platform or not download_url.startswith(('https://', 'http://')):
+        return jsonify({'success': False, 'message': 'Enter a name, platform and valid download URL'}), 400
+    app = RecommendedApp(name=name[:100], platform=platform[:40], download_url=download_url[:500])
+    db.session.add(app)
+    db.session.commit()
+    return jsonify({'success': True, 'id': app.id})
+
+
+@settings_bp.route('/api/user-panel/apps/<int:app_id>', methods=['DELETE'])
+@login_required
+@admin_required
+def delete_user_panel_app(app_id):
+    app = RecommendedApp.query.get_or_404(app_id)
+    db.session.delete(app)
+    db.session.commit()
+    return jsonify({'success': True})
 
 # Backup & Restore
 @settings_bp.route('/api/backup/create', methods=['POST'])

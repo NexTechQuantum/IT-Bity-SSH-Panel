@@ -195,7 +195,7 @@
                             <h3>{{ _('User Panel Access') }}</h3>
                             <p>{{ _('Control user panel availability') }}</p>
                         </div>
-                        <div class="status-badge active">
+                        <div class="status-badge active" id="userPanelBadge">
                             <i class="fas fa-circle"></i>
                             {{ _('Active') }}
                         </div>
@@ -207,9 +207,22 @@
                                 <span class="setting-desc">{{ _('Allow users to access their panel') }}</span>
                             </div>
                             <label class="toggle-switch">
-                                <input type="checkbox" id="userPanelAccess" checked>
+                                <input type="checkbox" id="userPanelAccess">
                                 <span class="toggle-slider"></span>
                             </label>
+                        </div>
+                        <div class="setting-row" style="display:block;">
+                            <div class="setting-info" style="margin-bottom:12px;">
+                                <label>{{ _('Recommended Applications') }}</label>
+                                <span class="setting-desc">Applications shown in the user panel</span>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 130px 1.5fr auto;gap:8px;">
+                                <input class="form-select" id="recommendedAppName" placeholder="App name">
+                                <input class="form-select" id="recommendedAppPlatform" placeholder="Platform">
+                                <input class="form-select" id="recommendedAppUrl" placeholder="https://...">
+                                <button class="btn-save" type="button" onclick="addRecommendedApp()" style="padding:0 16px;"><i class="fas fa-plus"></i></button>
+                            </div>
+                            <div id="recommendedAppsList" style="display:grid;gap:7px;margin-top:10px;"></div>
                         </div>
                     </div>
                 </div>

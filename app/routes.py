@@ -15,4 +15,4 @@ def dashboard():
     if current_user.role == 'admin':
         return render_template('admindashboard.html')
     else:
-        return render_template('userdashboard.html')
+        return redirect(url_for('user_panel.dashboard'))

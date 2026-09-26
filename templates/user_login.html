@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="{{ get_locale() }}" dir="{{ 'rtl' if get_locale() == 'fa' else 'ltr' }}">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Login — IT Bity</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/variables.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/user_panel.css', v='20260926-user-panel-v1') }}">
+</head>
+<body class="portal-login-page">
+    <main class="portal-login-shell">
+        <section class="portal-login-brand">
+            <span class="portal-brand-mark"><i class="fas fa-shield-halved"></i></span>
+            <span class="portal-eyebrow">IT BITY CONNECT</span>
+            <h1>Your connection,<br><span>under control.</span></h1>
+            <p>Usage, configurations and support in one secure place.</p>
+            <div class="portal-trust"><i class="fas fa-lock"></i> Secure user area</div>
+        </section>
+        <section class="portal-login-card">
+            <div class="portal-mobile-brand"><i class="fas fa-shield-halved"></i> IT Bity</div>
+            <h2>Welcome back</h2>
+            <p>Use the same credentials as your SSH account.</p>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+              {% for category, message in messages %}<div class="portal-alert {{ category }}">{{ message }}</div>{% endfor %}
+            {% endwith %}
+            {% if panel_enabled %}
+            <form method="post" class="portal-login-form">
+                <label>Username<div class="portal-input"><i class="fas fa-user"></i><input name="username" autocomplete="username" required></div></label>
+                <label>Password<div class="portal-input"><i class="fas fa-lock"></i><input name="password" type="password" autocomplete="current-password" required></div></label>
+                <label class="portal-remember"><input type="checkbox" name="remember"> Remember me</label>
+                <button type="submit" class="portal-primary-button">Sign in <i class="fas fa-arrow-right"></i></button>
+            </form>
+            {% else %}
+            <div class="portal-disabled"><i class="fas fa-clock"></i><strong>User panel is unavailable</strong><span>Please contact your service administrator.</span></div>
+            {% endif %}
+            <a class="portal-admin-link" href="{{ url_for('auth.login_page') }}">Administrator login</a>
+        </section>
+    </main>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="{{ get_locale() }}" dir="{{ 'rtl' if get_locale() == 'fa' else 'ltr' }}">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Panel — IT Bity</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/variables.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/user_panel.css', v='20260926-user-panel-v1') }}">
+</head>
+<body class="portal-page">
+<div class="portal-layout">
+    <aside class="portal-sidebar">
+        <a class="portal-logo" href="#overview"><span><i class="fas fa-bolt"></i></span> IT Bity</a>
+        <nav>
+            <a class="active" href="#overview"><i class="fas fa-grid-2"></i> Overview</a>
+            <a href="#configs"><i class="fas fa-shield-halved"></i> Configurations</a>
+            <a href="#connections"><i class="fas fa-clock-rotate-left"></i> Connections</a>
+            <a href="#apps"><i class="fas fa-mobile-screen"></i> Applications</a>
+            <a href="#support"><i class="fas fa-life-ring"></i> Support</a>
+        </nav>
+        <a class="portal-logout" href="{{ url_for('user_panel.logout') }}"><i class="fas fa-arrow-right-from-bracket"></i> Sign out</a>
+    </aside>
+    <main class="portal-main">
+        <header class="portal-topbar">
+            <div><span class="portal-eyebrow">CUSTOMER AREA</span><h1>Hello, {{ current_user.username }}</h1></div>
+            <div class="portal-account"><span>{{ current_user.username[:1]|upper }}</span><div><strong>{{ current_user.username }}</strong><small>Active account</small></div></div>
+        </header>
+
+        <section id="overview" class="portal-hero">
+            <div><span class="portal-plan-label">YOUR SERVICE</span><h2>{{ 'Service active' if current_user.is_active and not (limits and limits.is_expired) else 'Service inactive' }}</h2><p>Everything you need to manage your secure connection.</p></div>
+            <div class="portal-hero-actions"><button onclick="openPurchase('renew')"><i class="fas fa-rotate"></i> Renew</button><button class="secondary" onclick="openPurchase('upgrade')"><i class="fas fa-arrow-trend-up"></i> Upgrade</button></div>
+        </section>
+
+        <section class="portal-stats">
+            <article><span class="stat-icon violet"><i class="fas fa-arrow-down"></i></span><div><small>Downloaded</small><strong>{{ '%.2f'|format(limits.download_used_gb if limits else 0) }} GB</strong><em>of {{ limits.traffic_limit_gb if limits else 0 }} GB</em></div></article>
+            <article><span class="stat-icon blue"><i class="fas fa-arrow-up"></i></span><div><small>Uploaded</small><strong>{{ '%.2f'|format(limits.upload_used_gb if limits else 0) }} GB</strong><em>Total {{ '%.2f'|format(limits.total_used_gb if limits else 0) }} GB</em></div></article>
+            <article><span class="stat-icon green"><i class="fas fa-calendar"></i></span><div><small>Time remaining</small><strong>{{ days_remaining if days_remaining is not none else '∞' }} days</strong><em>{{ limits.expires_at.strftime('%Y-%m-%d') if limits and limits.expires_at else 'No expiry' }}</em></div></article>
+            <article><span class="stat-icon orange"><i class="fas fa-link"></i></span><div><small>Connections</small><strong>{{ active_connections }} / {{ limits.max_connections if limits else 0 }}</strong><em>Active now</em></div></article>
+        </section>
+
+        <div class="portal-grid">
+            <section id="configs" class="portal-card portal-config-card">
+                <div class="portal-card-head"><div><span class="portal-eyebrow">CONNECT</span><h3>Your configurations</h3></div><i class="fas fa-shield-halved"></i></div>
+                <div class="config-item"><span class="config-icon ssh"><i class="fas fa-terminal"></i></span><div><strong>SSH Tunnel</strong><small>{{ current_user.username }}@{{ request.host.split(':')[0] }}</small></div><span class="status-pill active">Active</span></div>
+                {% if wireguard %}
+                <div class="config-item"><span class="config-icon wg"><i class="fas fa-shield"></i></span><div><strong>WireGuard</strong><small>{{ wireguard.address }}</small></div><button class="icon-button" onclick="showWireGuard()"><i class="fas fa-qrcode"></i></button></div>
+                {% else %}<div class="portal-empty compact">No WireGuard configuration assigned.</div>{% endif %}
+            </section>
+
+            <section class="portal-card portal-usage-card">
+                <div class="portal-card-head"><div><span class="portal-eyebrow">THIS PERIOD</span><h3>Data usage</h3></div></div>
+                {% set pct = ([((limits.download_used_gb / limits.traffic_limit_gb * 100) if limits and limits.traffic_limit_gb else 0), 100]|min) %}
+                <div class="usage-ring" style="--usage:{{ pct }}"><div><strong>{{ '%.0f'|format(pct) }}%</strong><span>used</span></div></div>
+                <div class="usage-legend"><span><i class="download"></i> Download {{ '%.2f'|format(limits.download_used_gb if limits else 0) }} GB</span><span><i class="upload"></i> Upload {{ '%.2f'|format(limits.upload_used_gb if limits else 0) }} GB</span></div>
+            </section>
+        </div>
+
+        <section id="connections" class="portal-card portal-wide-card">
+            <div class="portal-card-head"><div><span class="portal-eyebrow">SECURITY</span><h3>Recent connections</h3></div></div>
+            <div class="portal-table"><div class="table-row table-head"><span>IP address</span><span>Connected</span><span>Traffic</span><span>Status</span></div>
+            {% for item in sessions %}<div class="table-row"><span><i class="fas fa-location-dot"></i> {{ item.ip_address }}</span><span>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</span><span>{{ '%.1f'|format((item.bytes_in + item.bytes_out) / 1048576) }} MB</span><span><b class="status-dot {{ 'closed' if item.closed_at else '' }}"></b>{{ 'Closed' if item.closed_at else 'Connected' }}</span></div>{% else %}<div class="portal-empty">No connection history yet.</div>{% endfor %}</div>
+        </section>
+
+        <div class="portal-grid lower-grid">
+            <section id="apps" class="portal-card"><div class="portal-card-head"><div><span class="portal-eyebrow">DOWNLOAD</span><h3>Recommended apps</h3></div></div>
+                <div class="app-list">{% for app in recommended_apps %}<a href="{{ app.download_url }}" target="_blank" rel="noopener"><span><i class="fas {{ app.icon }}"></i></span><div><strong>{{ app.name }}</strong><small>{{ app.platform }}</small></div><i class="fas fa-arrow-up-right-from-square"></i></a>{% else %}<div class="portal-empty compact">Your administrator has not added any apps yet.</div>{% endfor %}</div>
+            </section>
+            <section id="support" class="portal-card"><div class="portal-card-head"><div><span class="portal-eyebrow">NEED HELP?</span><h3>Support</h3></div></div>
+                <p class="card-copy">Tell us what happened and your administrator can follow up.</p><button class="portal-primary-button" onclick="openTicket()"><i class="fas fa-paper-plane"></i> New ticket</button>
+                <div class="ticket-list">{% for ticket in tickets %}<span>#{{ ticket.id }} · {{ ticket.subject }} <b>{{ ticket.status }}</b></span>{% endfor %}</div>
+            </section>
+        </div>
+
+        <section class="portal-card security-strip"><div><span class="stat-icon violet"><i class="fas fa-key"></i></span><div><strong>Password & security</strong><small>Change both your panel and SSH password.</small></div></div><button onclick="openPasswordChange()">Change password</button></section>
+    </main>
+</div>
+
+<div class="portal-modal" id="portalModal" hidden><div class="portal-modal-backdrop" onclick="closePortalModal()"></div><div class="portal-modal-card"><button class="modal-close" onclick="closePortalModal()"><i class="fas fa-xmark"></i></button><div id="portalModalContent"></div></div></div>
+<script>window.userPanelUrls = {password: {{ url_for('user_panel.change_password')|tojson }}, tickets: {{ url_for('user_panel.create_ticket')|tojson }}, wgConfig: {{ url_for('user_panel.wireguard_config')|tojson }}, wgQr: {{ url_for('user_panel.wireguard_qrcode')|tojson }}};</script>
+<script src="{{ url_for('static', filename='js/user_panel.js', v='20260926-user-panel-v1') }}"></script>
+</body></html>

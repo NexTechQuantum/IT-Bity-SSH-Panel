@@ -33,6 +33,11 @@ function handleToggleChange(e) {
     
     console.log(`Toggle ${toggleId} changed to: ${isChecked}`);
     
+    if (toggleId === 'userPanelAccess') {
+        saveUserPanelAccess(isChecked);
+        return;
+    }
+
     // Special handling for 2FA enforce
     if (toggleId === 'enable2FA') {
         const enforce2FA = document.getElementById('enforce2FA');
@@ -46,6 +51,15 @@ function handleToggleChange(e) {
 }
 
 async function loadSettings() {
+    try {
+        const response = await fetch('api/user-panel/status', { headers: { Accept: 'application/json' } });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Unable to load user panel setting');
+        updateUserPanelControl(Boolean(data.enabled));
+        await loadRecommendedApps();
+    } catch (error) {
+        showNotification(error.message, 'error');
+    }
     try {
         const response = await fetch('api/ssh/config', { headers: { Accept: 'application/json' } });
         const data = await response.json();
@@ -93,6 +107,64 @@ async function saveSSHConfig() {
     } finally {
         button.disabled = false;
     }
+}
+
+async function loadRecommendedApps() {
+    const response = await fetch('api/user-panel/apps', { headers: { Accept: 'application/json' } });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || 'Unable to load applications');
+    const list = document.getElementById('recommendedAppsList');
+    list.innerHTML = data.apps.length ? data.apps.map(app => `<div style="display:flex;align-items:center;gap:8px;padding:9px 11px;background:var(--bg-secondary);border-radius:8px;font-size:12px;"><i class="fas fa-mobile-screen"></i><strong>${escapeSettingHtml(app.name)}</strong><span style="color:var(--text-secondary);flex:1;">${escapeSettingHtml(app.platform)}</span><button type="button" class="btn-action delete" onclick="deleteRecommendedApp(${app.id})"><i class="fas fa-trash"></i></button></div>`).join('') : '<span class="setting-desc">No applications added yet.</span>';
+}
+
+async function addRecommendedApp() {
+    const payload = {name: document.getElementById('recommendedAppName').value.trim(), platform: document.getElementById('recommendedAppPlatform').value.trim(), download_url: document.getElementById('recommendedAppUrl').value.trim()};
+    const response = await fetch('api/user-panel/apps', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data = await response.json();
+    if (!response.ok || !data.success) return showNotification(data.message || 'Unable to add application', 'error');
+    ['recommendedAppName','recommendedAppPlatform','recommendedAppUrl'].forEach(id => document.getElementById(id).value = '');
+    await loadRecommendedApps();
+    showNotification('Application added', 'success');
+}
+
+async function deleteRecommendedApp(appId) {
+    const response = await fetch(`api/user-panel/apps/${appId}`, {method:'DELETE'});
+    if (!response.ok) return showNotification('Unable to delete application', 'error');
+    await loadRecommendedApps();
+}
+
+function escapeSettingHtml(value) {
+    const element = document.createElement('div');
+    element.textContent = value;
+    return element.innerHTML;
+}
+
+async function saveUserPanelAccess(enabled) {
+    const toggle = document.getElementById('userPanelAccess');
+    toggle.disabled = true;
+    try {
+        const response = await fetch('api/user-panel/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Unable to update user panel');
+        updateUserPanelControl(Boolean(data.enabled));
+        showNotification(`User panel ${data.enabled ? 'enabled' : 'disabled'}`, 'success');
+    } catch (error) {
+        toggle.checked = !enabled;
+        showNotification(error.message, 'error');
+    } finally {
+        toggle.disabled = false;
+    }
+}
+
+function updateUserPanelControl(enabled) {
+    document.getElementById('userPanelAccess').checked = enabled;
+    const badge = document.getElementById('userPanelBadge');
+    badge.classList.toggle('active', enabled);
+    badge.innerHTML = `<i class="fas fa-circle"></i> ${enabled ? 'Active' : 'Disabled'}`;
 }
 
 async function saveWireGuardConfig() {

@@ -10,25 +10,19 @@ auth_bp = Blueprint('auth', __name__)
 @auth_bp.route('', methods=['GET'])  
 def login_page():
     if current_user.is_authenticated:
-        return redirect(url_for('main.dashboard'))
+        return redirect(url_for('main.dashboard') if current_user.role == 'admin' else url_for('user_panel.dashboard'))
     return render_template('login.html')
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
     username = request.form.get('username')
     password = request.form.get('password')
-    user_type = request.form.get('user_type', 'user')
     remember = request.form.get('remember', False)
     
-    print(f'DEBUG: Login attempt - Username: {username}, Type: {user_type}')
-    
-    # جستجو با role به جای user_type
-    user = User.query.filter_by(username=username, role=user_type).first()
+    user = User.query.filter_by(username=username, role='admin').first()
     
     if user:
-        print(f'DEBUG: User found - {user.username}, Role: {user.role}')
         if user.check_password(password):
-            print('DEBUG: Password correct')
             login_user(user, remember=remember)
             
             user.last_login = datetime.utcnow()
@@ -38,10 +32,6 @@ def login():
             
             next_page = request.args.get('next')
             return redirect(next_page or url_for('main.dashboard'))
-        else:
-            print('DEBUG: Password incorrect')
-    else:
-        print(f'DEBUG: User not found with username={username} and role={user_type}')
     
     flash(_('Invalid username or password!'), 'error')
     return redirect(url_for('auth.login_page'))
