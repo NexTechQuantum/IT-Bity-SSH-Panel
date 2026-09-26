@@ -68,7 +68,7 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.addEventListener('click', function() {
             typeButtons.forEach(b => b.classList.remove('active'));
             this.classList.add('active');
-            userTypeInput.value = this.dataset.type;
+            if (userTypeInput) userTypeInput.value = this.dataset.type;
         });
     });
     
@@ -101,3 +101,23 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+function applyDefaultAdmin() {
+    document.getElementById('username').value = 'ITBity';
+    document.getElementById('password').value = 'Admin';
+    document.getElementById('username').focus();
+}
+
+async function copyDefaultAdmin() {
+    const text = 'Username: ITBity\nPassword: Admin';
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (_) {
+        const input = document.createElement('textarea');
+        input.value = text;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        input.remove();
+    }
+}

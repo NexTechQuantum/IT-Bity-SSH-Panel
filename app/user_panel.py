@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 from functools import wraps
 import subprocess
 
@@ -120,6 +120,32 @@ def create_ticket():
     db.session.add(ticket)
     db.session.commit()
     return jsonify(success=True, message='Ticket submitted', ticket_id=ticket.id)
+
+
+@user_panel_bp.route('/api/connections')
+@user_required
+def connection_history():
+    query = UserIPSession.query.filter_by(user_id=current_user.id)
+    try:
+        date_from = request.args.get('from', '').strip()
+        date_to = request.args.get('to', '').strip()
+        if date_from:
+            query = query.filter(UserIPSession.created_at >= datetime.combine(datetime.strptime(date_from, '%Y-%m-%d').date(), time.min))
+        if date_to:
+            query = query.filter(UserIPSession.created_at <= datetime.combine(datetime.strptime(date_to, '%Y-%m-%d').date(), time.max))
+    except ValueError:
+        return jsonify(success=False, message='Invalid date range'), 400
+    page = max(1, request.args.get('page', 1, type=int))
+    pagination = query.order_by(UserIPSession.created_at.desc()).paginate(page=page, per_page=25, error_out=False)
+    return jsonify(success=True, page=page, pages=pagination.pages, total=pagination.total, items=[{
+        'ip': item.ip_address,
+        'connected_at': item.created_at.strftime('%Y-%m-%d %H:%M'),
+        'closed_at': item.closed_at.strftime('%Y-%m-%d %H:%M') if item.closed_at else None,
+        'download_mb': round(item.bytes_in / 1048576, 2),
+        'upload_mb': round(item.bytes_out / 1048576, 2),
+        'total_mb': round((item.bytes_in + item.bytes_out) / 1048576, 2),
+        'active': item.closed_at is None,
+    } for item in pagination.items])
 
 
 @user_panel_bp.route('/wireguard/config')

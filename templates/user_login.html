@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/user_panel.css', v='20260926-user-panel-v1') }}">
 </head>
 <body class="portal-login-page">
+    <button class="portal-theme-button portal-login-theme" onclick="togglePortalTheme()" aria-label="Toggle theme"><i id="portalThemeIcon" class="fas fa-moon"></i></button>
     <main class="portal-login-shell">
         <section class="portal-login-brand">
             <span class="portal-brand-mark"><i class="fas fa-shield-halved"></i></span>
@@ -36,5 +37,6 @@
             <a class="portal-admin-link" href="{{ url_for('auth.login_page') }}">Administrator login</a>
         </section>
     </main>
+    <script src="{{ url_for('static', filename='js/user_panel.js', v='20260926-user-panel-v2') }}"></script>
 </body>
 </html>

@@ -1,170 +1,42 @@
 <!DOCTYPE html>
 <html lang="{{ get_locale() }}" dir="{{ 'rtl' if get_locale() == 'fa' else 'ltr' }}">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ _('Login') }} - IT Bity SSH Panel</title>
-    
-
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100..900&display=swap" rel="stylesheet">
-    
-    {% if get_locale() == 'fa' %}
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.rtl.min.css">
-    {% else %}
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    {% endif %}
-    
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ _('Login') }} — IT Bity Admin</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
-    
-<style>
-    [dir="rtl"] body {
-        font-family: 'Vazirmatn', sans-serif;
-    }
-    
-    [dir="rtl"] h1, [dir="rtl"] h2, [dir="rtl"] h3, 
-    [dir="rtl"] p, [dir="rtl"] span, [dir="rtl"] a, 
-    [dir="rtl"] button, [dir="rtl"] label {
-        font-family: 'Vazirmatn', sans-serif;
-    }
-    
-    /* Keep Font Awesome icons working */
-    i[class*="fa"], .fa, .fas, .far, .fab {
-        font-family: "Font Awesome 6 Free" !important;
-        font-weight: 900 !important;
-    }
-</style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/variables.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/user_panel.css', v='20260926-auth-v2') }}">
 </head>
-<body>
-
-    <!-- Top Controls: Theme & Language -->
-    <div class="top-controls">
-        <button class="control-btn theme-btn" onclick="toggleTheme()" title="{{ _('Toggle Theme') }}">
-            <i id="themeIcon" class="fas fa-moon"></i>
-        </button>
-        <div class="language-dropdown">
-            <button class="control-btn language-btn" id="languageBtn">
-                <i class="fas fa-globe"></i>
-                <span>{{ get_locale().upper() }}</span>
-                <i class="fas fa-chevron-down arrow-icon"></i>
-            </button>
-            <div class="language-menu" id="languageMenu">
-                <a href="{{ url_for('auth.change_language', lang='fa') }}" 
-                   class="language-item {{ 'active' if get_locale() == 'fa' else '' }}">
-                    <span>فارسی</span>
-                    <span class="lang-code">FA</span>
-                </a>
-                <a href="{{ url_for('auth.change_language', lang='en') }}" 
-                   class="language-item {{ 'active' if get_locale() == 'en' else '' }}">
-                    <span>English</span>
-                    <span class="lang-code">EN</span>
-                </a>
-            </div>
-        </div>
+<body class="portal-login-page admin-login-page">
+    <div class="admin-login-controls">
+        <button class="portal-theme-button" onclick="toggleTheme()" aria-label="Toggle theme"><i id="themeIcon" class="fas fa-moon"></i></button>
+        <a href="{{ url_for('auth.change_language', lang='fa' if get_locale() == 'en' else 'en') }}" class="portal-theme-button admin-lang-button"><i class="fas fa-globe"></i><span>{{ 'FA' if get_locale() == 'en' else 'EN' }}</span></a>
     </div>
-
-    <div class="login-container">
-        <div class="login-card">
-            <div class="logo-section">
-                <div class="logo-icon">
-                    <i class="fas fa-server"></i>
-                </div>
-                <h1 class="panel-title">IT Bity SSH Panel</h1>
-                <p class="panel-subtitle">{{ _('SSH Server Management') }}</p>
-            </div>
-            
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show">
-                            <i class="fas fa-exclamation-circle {{ 'me-2' if get_locale() == 'en' else 'ms-2' }}"></i>
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-            
-            <form id="loginForm" method="POST" action="{{ url_for('auth.login') }}">
-                <div class="user-type-selector mb-4">
-                    <button type="button" class="type-btn active" style="width:100%">
-                        <i class="fas fa-user-shield"></i><span>{{ _('Admin') }}</span>
-                    </button>
-                </div>
-                <div class="form-group mb-3">
-                    <label for="username" class="form-label">
-                        <i class="fas fa-user {{ 'me-2' if get_locale() == 'en' else 'ms-2' }}"></i>
-                        {{ _('Username') }}
-                    </label>
-                    <div class="input-wrapper">
-                        <input 
-                            type="text" 
-                            class="form-control glass-input" 
-                            id="username" 
-                            name="username" 
-                            placeholder="{{ _('Enter your username') }}"
-                            required
-                            autocomplete="username"
-                        >
-                    </div>
-                </div>
-                
-                <div class="form-group mb-3">
-                    <label for="password" class="form-label">
-                        <i class="fas fa-lock {{ 'me-2' if get_locale() == 'en' else 'ms-2' }}"></i>
-                        {{ _('Password') }}
-                    </label>
-                    <div class="input-wrapper position-relative">
-                        <input 
-                            type="password" 
-                            class="form-control glass-input" 
-                            id="password" 
-                            name="password" 
-                            placeholder="{{ _('Enter your password') }}"
-                            required
-                            autocomplete="current-password"
-                        >
-                        <button type="button" class="password-toggle" id="togglePassword">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="form-check mb-4">
-                    <input class="form-check-input" type="checkbox" id="remember" name="remember">
-                    <label class="form-check-label" for="remember">
-                        {{ _('Remember me') }}
-                    </label>
-                </div>
-                
-                <button type="submit" class="btn-login w-100">
-                    <span class="btn-text">{{ _('Login to Panel') }}</span>
-                    <i class="fas fa-arrow-{{ 'left' if get_locale() == 'fa' else 'right' }} {{ 'ms-2' if get_locale() == 'fa' else 'me-2' }}"></i>
-                </button>
+    <main class="portal-login-shell admin-login-shell">
+        <section class="portal-login-brand admin-login-brand">
+            <span class="portal-brand-mark"><i class="fas fa-server"></i></span>
+            <span class="portal-eyebrow">IT BITY CONTROL</span>
+            <h1>Command your<br><span>network.</span></h1>
+            <p>Users, traffic, security and server configuration in one focused workspace.</p>
+            <div class="admin-feature-list"><span><i class="fas fa-chart-line"></i> Live service overview</span><span><i class="fas fa-shield-halved"></i> Secure access control</span><span><i class="fas fa-bolt"></i> Fast user management</span></div>
+        </section>
+        <section class="portal-login-card admin-login-card">
+            <div class="portal-mobile-brand"><i class="fas fa-server"></i> IT Bity Admin</div>
+            <span class="portal-eyebrow">ADMINISTRATOR</span><h2>Welcome back</h2><p>Sign in to manage your server.</p>
+            {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="portal-alert {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+            <form id="loginForm" method="post" action="{{ url_for('auth.login') }}" class="portal-login-form">
+                <label>{{ _('Username') }}<div class="portal-input"><i class="fas fa-user-shield"></i><input id="username" name="username" autocomplete="username" required></div></label>
+                <label>{{ _('Password') }}<div class="portal-input"><i class="fas fa-lock"></i><input id="password" name="password" type="password" autocomplete="current-password" required><button type="button" class="inline-password-toggle" id="togglePassword"><i class="fas fa-eye"></i></button></div></label>
+                <label class="portal-remember"><input type="checkbox" name="remember"> {{ _('Remember me') }}</label>
+                <button type="submit" class="portal-primary-button">{{ _('Login to Panel') }} <i class="fas fa-arrow-right"></i></button>
             </form>
-
-            <div style="text-align:center;margin-top:18px;">
-                <a href="{{ url_for('user_panel.login_page') }}" style="color:var(--primary);font-size:13px;text-decoration:none;">
-                    <i class="fas fa-user"></i> User panel login
-                </a>
+            <div class="default-access-card">
+                <div><span>Default access</span><code>ITBity / Admin</code></div>
+                <button type="button" onclick="copyDefaultAdmin()" title="Copy"><i class="fas fa-copy"></i></button>
+                <button type="button" onclick="applyDefaultAdmin()" title="Apply to fields"><i class="fas fa-wand-magic-sparkles"></i> Apply</button>
             </div>
-            
-            <div class="default-credentials">
-                <small>
-                    <i class="fas fa-info-circle {{ 'me-1' if get_locale() == 'en' else 'ms-1' }}"></i>
-                    {{ _('Default credentials') }}: ITBity / Admin
-                </small>
-            </div>
-        </div>
-        
-        <div class="footer-text">
-            <p>Powered by <strong>IT Bity</strong> © 2025</p>
-        </div>
-    </div>
-    
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="{{ url_for('static', filename='js/login.js') }}"></script>
-</body>
-</html>
+            <a class="portal-admin-link" href="{{ url_for('user_panel.login_page') }}"><i class="fas fa-user"></i> User panel login</a>
+        </section>
+    </main>
+    <script src="{{ url_for('static', filename='js/login.js', v='20260926-admin-modern-v1') }}"></script>
+</body></html>

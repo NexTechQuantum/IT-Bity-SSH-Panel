@@ -1,6 +1,19 @@
 const modal = document.getElementById('portalModal');
 const modalContent = document.getElementById('portalModalContent');
 
+function initPortalTheme() {
+  const theme = localStorage.getItem('theme') || 'light';
+  document.documentElement.setAttribute('data-theme', theme);
+  const icon = document.getElementById('portalThemeIcon');
+  if (icon) icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+}
+
+function togglePortalTheme() {
+  const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('theme', theme);
+  initPortalTheme();
+}
+
 function openModal(html) { modalContent.innerHTML = html; modal.hidden = false; document.body.style.overflow = 'hidden'; }
 function closePortalModal() { modal.hidden = true; modalContent.innerHTML = ''; document.body.style.overflow = ''; }
 function escapeHtml(value) { const node = document.createElement('div'); node.textContent = value; return node.innerHTML; }
@@ -39,4 +52,28 @@ function showWireGuard() {
   openModal(`<span class="portal-eyebrow">WIREGUARD</span><h2>Scan configuration</h2><p>Open WireGuard on your device and scan this QR code.</p><img class="wg-user-qr" src="${window.userPanelUrls.wgQr}" alt="WireGuard QR"><div style="display:flex;gap:9px;justify-content:center"><a class="portal-primary-button" href="${window.userPanelUrls.wgConfig}?download=1"><i class="fas fa-download"></i> Download .conf</a><a class="portal-primary-button" href="${window.userPanelUrls.wgQr}?download=1"><i class="fas fa-qrcode"></i> Download QR</a></div>`);
 }
 
-document.addEventListener('keydown', event => { if (event.key === 'Escape') closePortalModal(); });
+function openConnectionHistory() {
+  openModal(`<span class="portal-eyebrow">SECURITY</span><h2>Connection history</h2><p>Filter sessions by connection date. Results are shown 25 at a time.</p><form class="history-filters" onsubmit="loadConnectionHistory(event, 1)"><label>From<input id="historyFrom" type="date"></label><label>To<input id="historyTo" type="date"></label><button class="portal-primary-button" type="submit"><i class="fas fa-filter"></i> Filter</button></form><div id="connectionHistoryResults" class="history-results"><div class="portal-empty">Loading…</div></div>`);
+  loadConnectionHistory(null, 1);
+}
+
+async function loadConnectionHistory(event, page) {
+  if (event) event.preventDefault();
+  const from = document.getElementById('historyFrom')?.value || '';
+  const to = document.getElementById('historyTo')?.value || '';
+  const params = new URLSearchParams({page});
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  const target = document.getElementById('connectionHistoryResults');
+  target.innerHTML = '<div class="portal-empty">Loading…</div>';
+  const response = await fetch(`${window.userPanelUrls.connections}?${params}`);
+  const data = await response.json();
+  if (!response.ok || !data.success) { target.innerHTML = `<div class="portal-alert error">${escapeHtml(data.message || 'Could not load connections')}</div>`; return; }
+  const rows = data.items.map(item => `<div class="history-item"><div><strong>${escapeHtml(item.ip)}</strong><small>${escapeHtml(item.connected_at)}${item.closed_at ? ` → ${escapeHtml(item.closed_at)}` : ''}</small></div><div class="history-traffic"><span><i class="fas fa-arrow-down"></i> ${item.download_mb} MB</span><span><i class="fas fa-arrow-up"></i> ${item.upload_mb} MB</span></div><span class="status-pill ${item.active ? 'active' : ''}">${item.active ? 'Active' : 'Closed'}</span></div>`).join('');
+  const pages = data.pages > 1 ? `<div class="history-pages"><button ${data.page <= 1 ? 'disabled' : ''} onclick="loadConnectionHistory(null, ${data.page - 1})"><i class="fas fa-chevron-left"></i></button><span>${data.page} / ${data.pages}</span><button ${data.page >= data.pages ? 'disabled' : ''} onclick="loadConnectionHistory(null, ${data.page + 1})"><i class="fas fa-chevron-right"></i></button></div>` : '';
+  target.innerHTML = rows || '<div class="portal-empty">No connections in this date range.</div>';
+  target.insertAdjacentHTML('beforeend', pages);
+}
+
+initPortalTheme();
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && modal) closePortalModal(); });

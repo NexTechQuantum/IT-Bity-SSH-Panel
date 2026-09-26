@@ -23,7 +23,7 @@
     <main class="portal-main">
         <header class="portal-topbar">
             <div><span class="portal-eyebrow">CUSTOMER AREA</span><h1>Hello, {{ current_user.username }}</h1></div>
-            <div class="portal-account"><span>{{ current_user.username[:1]|upper }}</span><div><strong>{{ current_user.username }}</strong><small>Active account</small></div></div>
+            <div class="portal-top-actions"><button class="portal-theme-button" onclick="togglePortalTheme()" aria-label="Toggle theme"><i id="portalThemeIcon" class="fas fa-moon"></i></button><div class="portal-account"><span>{{ current_user.username[:1]|upper }}</span><div><strong>{{ current_user.username }}</strong><small>Active account</small></div></div></div>
         </header>
 
         <section id="overview" class="portal-hero">
@@ -56,8 +56,8 @@
         </div>
 
         <section id="connections" class="portal-card portal-wide-card">
-            <div class="portal-card-head"><div><span class="portal-eyebrow">SECURITY</span><h3>Recent connections</h3></div></div>
-            <div class="portal-table"><div class="table-row table-head"><span>IP address</span><span>Connected</span><span>Traffic</span><span>Status</span></div>
+            <div class="portal-card-head"><div><span class="portal-eyebrow">SECURITY</span><h3>Recent connections</h3></div><button class="portal-text-button" onclick="openConnectionHistory()">View all <i class="fas fa-arrow-right"></i></button></div>
+            <div class="portal-table portal-table-scroll"><div class="table-row table-head"><span>IP address</span><span>Connected</span><span>Traffic</span><span>Status</span></div>
             {% for item in sessions %}<div class="table-row"><span><i class="fas fa-location-dot"></i> {{ item.ip_address }}</span><span>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</span><span>{{ '%.1f'|format((item.bytes_in + item.bytes_out) / 1048576) }} MB</span><span><b class="status-dot {{ 'closed' if item.closed_at else '' }}"></b>{{ 'Closed' if item.closed_at else 'Connected' }}</span></div>{% else %}<div class="portal-empty">No connection history yet.</div>{% endfor %}</div>
         </section>
 
@@ -76,6 +76,6 @@
 </div>
 
 <div class="portal-modal" id="portalModal" hidden><div class="portal-modal-backdrop" onclick="closePortalModal()"></div><div class="portal-modal-card"><button class="modal-close" onclick="closePortalModal()"><i class="fas fa-xmark"></i></button><div id="portalModalContent"></div></div></div>
-<script>window.userPanelUrls = {password: {{ url_for('user_panel.change_password')|tojson }}, tickets: {{ url_for('user_panel.create_ticket')|tojson }}, wgConfig: {{ url_for('user_panel.wireguard_config')|tojson }}, wgQr: {{ url_for('user_panel.wireguard_qrcode')|tojson }}};</script>
-<script src="{{ url_for('static', filename='js/user_panel.js', v='20260926-user-panel-v1') }}"></script>
+<script>window.userPanelUrls = {password: {{ url_for('user_panel.change_password')|tojson }}, tickets: {{ url_for('user_panel.create_ticket')|tojson }}, connections: {{ url_for('user_panel.connection_history')|tojson }}, wgConfig: {{ url_for('user_panel.wireguard_config')|tojson }}, wgQr: {{ url_for('user_panel.wireguard_qrcode')|tojson }}};</script>
+<script src="{{ url_for('static', filename='js/user_panel.js', v='20260926-user-panel-v2') }}"></script>
 </body></html>
