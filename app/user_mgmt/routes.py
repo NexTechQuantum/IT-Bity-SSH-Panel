@@ -1,5 +1,6 @@
 # app/user_mgmt/routes.py
 from flask import Blueprint, render_template, request, jsonify, Response
+import subprocess
 from flask_login import login_required
 from .utils import admin_required
 from .services import (
@@ -134,5 +135,32 @@ def wireguard_config(user_id):
                 headers={'Content-Disposition': f'attachment; filename=itbity-{peer.user.username}.conf'},
             )
         return jsonify({'success': True, 'config': config})
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500
+
+
+@user_management_bp.route('/api/users/<int:user_id>/wireguard/qrcode', methods=['GET'])
+@login_required
+@admin_required
+def wireguard_qrcode(user_id):
+    """Render the private client configuration as an authenticated QR image."""
+    try:
+        config, peer = get_client_config(user_id)
+        process = subprocess.run(
+            ['/usr/bin/qrencode', '-t', 'PNG', '-o', '-', '-s', '6', '-m', '2'],
+            input=config.encode('utf-8'), capture_output=True, timeout=10,
+        )
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr.decode('utf-8', errors='replace').strip()
+                               or 'QR generation failed')
+        disposition = 'attachment' if request.args.get('download') == '1' else 'inline'
+        return Response(
+            process.stdout, mimetype='image/png',
+            headers={
+                'Content-Disposition':
+                    f'{disposition}; filename=itbity-{peer.user.username}-wireguard.png',
+                'Cache-Control': 'no-store, private',
+            },
+        )
     except Exception as error:
         return jsonify({'success': False, 'message': str(error)}), 500

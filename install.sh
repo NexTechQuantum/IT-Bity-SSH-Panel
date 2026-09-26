@@ -95,7 +95,7 @@ echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-
 
 # Install all monitoring tools non-interactively
 apt install -y nethogs vnstat iftop conntrack iptables-persistent
-apt install -y wireguard-tools
+apt install -y wireguard-tools qrencode
 
 # Enable vnstat service (for interface traffic persistence)
 systemctl enable vnstat

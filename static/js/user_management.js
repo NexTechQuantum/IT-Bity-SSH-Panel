@@ -757,15 +757,21 @@ async function showWireGuardConfig(userId, user) {
   const data = await response.json();
   if (!response.ok || !data.success) throw new Error(data.message || 'Could not load configuration');
   const enabled = user?.wireguard?.enabled !== false;
+  const qrUrl = `/${panelPath}/user_management/api/users/${userId}/wireguard/qrcode`;
   const result = await Swal.fire({
     title: `WireGuard — ${escapeHtml(user?.username || '')}`, width: 720,
     html: `<div style="text-align:left;">
       <p><strong>Address:</strong> ${escapeHtml(user?.wireguard?.address || '-')}</p>
+      <div style="display:flex;justify-content:center;margin:12px 0;">
+        <img src="${qrUrl}" alt="WireGuard QR code" style="width:min(280px,100%);height:auto;border:1px solid #e5e7eb;border-radius:12px;padding:8px;background:#fff;" loading="eager">
+      </div>
       <textarea id="wireguard-config-text" readonly style="width:100%;height:270px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #ddd;border-radius:8px;direction:ltr;">${escapeHtml(data.config)}</textarea>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
         <button type="button" class="swal2-confirm swal2-styled" onclick="copyWireGuardConfig()"><i class="fas fa-copy"></i> Copy</button>
         <button type="button" class="swal2-confirm swal2-styled" onclick="shareWireGuardConfig('${escapeHtml(user?.username || '')}')"><i class="fas fa-share-nodes"></i> Share</button>
         <a class="swal2-confirm swal2-styled" style="text-decoration:none;" href="/${panelPath}/user_management/api/users/${userId}/wireguard/config?download=1"><i class="fas fa-download"></i> Download</a>
+        <a class="swal2-confirm swal2-styled" style="text-decoration:none;" href="${qrUrl}?download=1"><i class="fas fa-qrcode"></i> Download QR</a>
+        <button type="button" class="swal2-confirm swal2-styled" onclick="shareWireGuardQr(${userId}, '${escapeHtml(user?.username || '')}')"><i class="fas fa-share-nodes"></i> Share QR</button>
       </div></div>`,
     showCancelButton: true, showDenyButton: true,
     confirmButtonText: enabled ? 'Disable Peer' : 'Enable Peer',
@@ -799,6 +805,26 @@ async function shareWireGuardConfig(username) {
     await writeClipboard(text);
     Swal.showValidationMessage('Configuration copied');
   }
+}
+
+async function shareWireGuardQr(userId, username) {
+  const response = await fetch(`/${panelPath}/user_management/api/users/${userId}/wireguard/qrcode`);
+  if (!response.ok) throw new Error('Could not generate QR code');
+  const blob = await response.blob();
+  const file = new File([blob], `itbity-${username}-wireguard.png`, { type: 'image/png' });
+  if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+    await navigator.share({ title: `WireGuard QR — ${username}`, files: [file] });
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = file.name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  Swal.showValidationMessage('QR downloaded; attach the image in your messenger');
 }
 
 function getRoleColor(role) {
