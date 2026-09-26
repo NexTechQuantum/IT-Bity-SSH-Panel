@@ -369,6 +369,12 @@ async function uploadRestoreBackup(file) {
     if (!file.name.toLowerCase().endsWith('.zip')) return showNotification('Choose a ZIP backup file', 'error');
     const form = new FormData(); form.append('backup', file);
     const badge = document.getElementById('restoreStatusBadge');
+    const zone = document.getElementById('restoreDropZone');
+    const title = document.getElementById('restoreDropTitle');
+    const hint = document.getElementById('restoreDropHint');
+    zone.classList.remove('is-valid');
+    title.textContent = file.name;
+    hint.textContent = `${formatBytes(file.size)} · Validating backup…`;
     badge.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Validating';
     try {
         const response = await fetch('api/backup/restore/upload', {method:'POST',body:form});
@@ -379,9 +385,18 @@ async function uploadRestoreBackup(file) {
         document.getElementById('restoreSummary').innerHTML = `<div><small>Created</small><strong>${backup.created_at ? new Date(backup.created_at).toLocaleString() : '-'}</strong></div><div><small>Source server</small><strong>${escapeSettingHtml(backup.hostname || '-')}</strong></div><div><small>Archive size</small><strong>${formatBytes(backup.size)}</strong></div><div><small>Files</small><strong>${backup.files}</strong></div>`;
         document.getElementById('restoreSummary').hidden = false;
         document.getElementById('restoreOptions').hidden = false;
+        zone.classList.add('is-valid');
+        zone.querySelector(':scope > i').className = 'fas fa-circle-check';
+        hint.textContent = `${formatBytes(file.size)} · Valid backup · Click to replace`;
+        zone.querySelector('button').textContent = 'Choose Another File';
         badge.className = 'status-badge active'; badge.innerHTML = '<i class="fas fa-circle"></i> Valid backup';
     } catch (error) {
         stagedRestoreId = null; badge.className = 'status-badge inactive'; badge.innerHTML = '<i class="fas fa-circle"></i> Invalid';
+        zone.classList.remove('is-valid');
+        zone.querySelector(':scope > i').className = 'fas fa-cloud-arrow-up';
+        title.textContent = 'Drag and drop backup ZIP or click to browse';
+        hint.textContent = 'Telegram full backup · Maximum 50 MB';
+        zone.querySelector('button').textContent = 'Choose File';
         showNotification(error.message, 'error');
     }
 }
