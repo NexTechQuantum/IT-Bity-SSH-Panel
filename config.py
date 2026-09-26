@@ -24,6 +24,7 @@ class Config:
     HOST = os.environ.get('HOST') or '127.0.0.1'
     PORT = int(os.environ.get('PORT') or 5000)
     DEBUG = os.environ.get('DEBUG') == 'True'
+    MAX_CONTENT_LENGTH = 51 * 1024 * 1024
     
     # Babel
     BABEL_DEFAULT_LOCALE = 'fa'

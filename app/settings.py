@@ -3,7 +3,9 @@ from flask_login import login_required, current_user
 from flask_babel import gettext as _
 from functools import wraps
 import json
+import os
 import subprocess
+import tempfile
 from app import db
 from app.models import AppSetting, RecommendedApp
 
@@ -283,5 +285,36 @@ def create_backup():
 @login_required
 @admin_required
 def restore_backup():
-    """Restore from backup - TODO: Implement"""
-    return jsonify({'success': False, 'message': 'Not implemented yet'}), 501
+    payload = request.get_json(silent=True) or {}
+    if payload.get('confirmation') != 'RESTORE':
+        return jsonify({'success': False, 'message': 'Type RESTORE to confirm'}), 400
+    if not current_user.check_password(str(payload.get('admin_password', ''))):
+        return jsonify({'success': False, 'message': 'Administrator password is incorrect'}), 403
+    restore_id = str(payload.get('restore_id', ''))
+    mode = str(payload.get('mode', 'data'))
+    try:
+        return jsonify(_backup_helper('restore-trigger', restore_id, mode, timeout=20))
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 400
+
+
+@settings_bp.route('/api/backup/restore/upload', methods=['POST'])
+@login_required
+@admin_required
+def upload_restore_backup():
+    uploaded = request.files.get('backup')
+    if not uploaded or not uploaded.filename.lower().endswith('.zip'):
+        return jsonify({'success': False, 'message': 'Choose an IT Bity ZIP backup'}), 400
+    if request.content_length and request.content_length > 51 * 1024 * 1024:
+        return jsonify({'success': False, 'message': 'Backup file is larger than 50 MB'}), 413
+    descriptor, path = tempfile.mkstemp(prefix='itbity-restore-', suffix='.zip', dir='/tmp')
+    os.close(descriptor)
+    try:
+        uploaded.save(path)
+        return jsonify(_backup_helper('stage', os.path.basename(path), timeout=40))
+    except Exception as error:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return jsonify({'success': False, 'message': str(error)}), 400

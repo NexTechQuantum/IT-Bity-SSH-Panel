@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/variables.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/footer.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css', v='20260926-telegram-backup-v3') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/settings.css', v='20260926-backup-restore-v1') }}">
     
     <style>
         [dir="rtl"] body {
@@ -287,6 +287,29 @@
                     </div>
                 </div>
 
+                <!-- Backup Recovery -->
+                <div class="setting-card restore-card">
+                    <div class="card-header">
+                        <div class="header-icon backup"><i class="fas fa-clock-rotate-left"></i></div>
+                        <div class="header-text"><h3>Backup Recovery</h3><p>Validate and restore an IT Bity ZIP backup</p></div>
+                        <div class="status-badge inactive" id="restoreStatusBadge"><i class="fas fa-circle"></i> No file</div>
+                    </div>
+                    <div class="card-body">
+                        <div class="restore-drop-zone" id="restoreDropZone" onclick="document.getElementById('restoreBackupFile').click()">
+                            <i class="fas fa-file-zipper"></i><div><strong>Select backup ZIP</strong><span>Choose a backup downloaded from your Telegram channel · Maximum 50 MB</span></div><button type="button">Browse</button>
+                            <input type="file" id="restoreBackupFile" accept=".zip,application/zip" hidden>
+                        </div>
+                        <div class="restore-summary" id="restoreSummary" hidden></div>
+                        <div class="restore-options" id="restoreOptions" hidden>
+                            <label class="restore-mode"><input type="radio" name="restoreMode" value="data" checked><span><i class="fas fa-database"></i><strong>Data recovery</strong><small>Database and VPN configurations · Recommended</small></span></label>
+                            <label class="restore-mode"><input type="radio" name="restoreMode" value="full"><span><i class="fas fa-server"></i><strong>Full panel recovery</strong><small>Data plus application files · Advanced</small></span></label>
+                            <div class="restore-confirm-grid"><label><span>Administrator password</span><input class="form-select" id="restoreAdminPassword" type="password" autocomplete="current-password"></label><label><span>Type RESTORE</span><input class="form-select" id="restoreConfirmation" autocomplete="off" placeholder="RESTORE"></label></div>
+                            <div class="restore-warning"><i class="fas fa-triangle-exclamation"></i><span>A safety snapshot of the current server is created first. Restoration replaces existing data and may briefly restart services.</span></div>
+                            <button class="btn-action restore-button" id="restoreBackupButton" onclick="restoreBackup()"><i class="fas fa-clock-rotate-left"></i> Start recovery</button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </main>
@@ -297,6 +320,6 @@
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="{{ url_for('static', filename='js/navbar.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/settings.js', v='20260926-telegram-backup-v2') }}"></script>
+    <script src="{{ url_for('static', filename='js/settings.js', v='20260926-backup-restore-v1') }}"></script>
 </body>
 </html>

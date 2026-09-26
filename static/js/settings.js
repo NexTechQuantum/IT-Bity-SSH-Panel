@@ -2,6 +2,7 @@
 
 document.addEventListener('DOMContentLoaded', function() {
     setupEventListeners();
+    setupRestoreUpload();
     loadSettings();
 });
 
@@ -348,6 +349,55 @@ function formatBytes(bytes) {
     const units = ['B','KB','MB','GB'];
     const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
     return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+}
+
+let stagedRestoreId = null;
+
+function setupRestoreUpload() {
+    const input = document.getElementById('restoreBackupFile');
+    const zone = document.getElementById('restoreDropZone');
+    input.addEventListener('change', () => input.files[0] && uploadRestoreBackup(input.files[0]));
+    zone.addEventListener('dragover', event => { event.preventDefault(); zone.classList.add('is-dragging'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('is-dragging'));
+    zone.addEventListener('drop', event => {
+        event.preventDefault(); zone.classList.remove('is-dragging');
+        if (event.dataTransfer.files[0]) uploadRestoreBackup(event.dataTransfer.files[0]);
+    });
+}
+
+async function uploadRestoreBackup(file) {
+    if (!file.name.toLowerCase().endsWith('.zip')) return showNotification('Choose a ZIP backup file', 'error');
+    const form = new FormData(); form.append('backup', file);
+    const badge = document.getElementById('restoreStatusBadge');
+    badge.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Validating';
+    try {
+        const response = await fetch('api/backup/restore/upload', {method:'POST',body:form});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Backup validation failed');
+        stagedRestoreId = data.restore_id;
+        const backup = data.backup;
+        document.getElementById('restoreSummary').innerHTML = `<div><small>Created</small><strong>${backup.created_at ? new Date(backup.created_at).toLocaleString() : '-'}</strong></div><div><small>Source server</small><strong>${escapeSettingHtml(backup.hostname || '-')}</strong></div><div><small>Archive size</small><strong>${formatBytes(backup.size)}</strong></div><div><small>Files</small><strong>${backup.files}</strong></div>`;
+        document.getElementById('restoreSummary').hidden = false;
+        document.getElementById('restoreOptions').hidden = false;
+        badge.className = 'status-badge active'; badge.innerHTML = '<i class="fas fa-circle"></i> Valid backup';
+    } catch (error) {
+        stagedRestoreId = null; badge.className = 'status-badge inactive'; badge.innerHTML = '<i class="fas fa-circle"></i> Invalid';
+        showNotification(error.message, 'error');
+    }
+}
+
+async function restoreBackup() {
+    if (!stagedRestoreId) return showNotification('Validate a backup file first', 'error');
+    const confirmation = document.getElementById('restoreConfirmation').value.trim();
+    if (confirmation !== 'RESTORE') return showNotification('Type RESTORE to confirm', 'error');
+    if (!confirm('This will replace existing server data. Start recovery now?')) return;
+    const button = document.getElementById('restoreBackupButton'); button.disabled = true;
+    try {
+        const response = await fetch('api/backup/restore', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({restore_id:stagedRestoreId,mode:document.querySelector('input[name="restoreMode"]:checked').value,admin_password:document.getElementById('restoreAdminPassword').value,confirmation})});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.message || 'Recovery could not start');
+        showNotification('Recovery started. The panel may restart briefly.', 'success');
+    } catch (error) { showNotification(error.message, 'error'); button.disabled = false; }
 }
 
 // Notification Helper

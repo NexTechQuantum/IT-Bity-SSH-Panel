@@ -5,6 +5,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import shutil
 import socket
@@ -21,9 +22,11 @@ CONFIG_DIR = Path('/etc/itbity-backup')
 CONFIG_FILE = CONFIG_DIR / 'config.json'
 STATE_FILE = CONFIG_DIR / 'state.json'
 BACKUP_DIR = Path('/var/lib/itbity-backup')
+UPLOAD_DIR = BACKUP_DIR / 'uploads'
 PROJECT_DIR = Path('/var/www/itbity-ssh-panel')
 TIMER_FILE = Path('/etc/systemd/system/itbity-backup.timer')
 MAX_TELEGRAM_BYTES = 49 * 1024 * 1024
+MAX_RESTORE_BYTES = 50 * 1024 * 1024
 
 
 def emit(success, **payload):
@@ -129,6 +132,90 @@ def add_tree(archive, source, prefix, excluded=()):
         archive.write(path, Path(prefix) / relative)
 
 
+def inspect_archive(path):
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > MAX_RESTORE_BYTES:
+        raise ValueError('Invalid backup file or file is larger than 50 MB')
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        required = {'metadata.json', 'database/database.sql'}
+        if not required.issubset(names):
+            raise ValueError('This is not a valid IT Bity full backup')
+        for item in archive.infolist():
+            target = Path(item.filename)
+            if target.is_absolute() or '..' in target.parts or (item.external_attr >> 16) & 0o170000 == 0o120000:
+                raise ValueError('Unsafe path found in backup archive')
+        metadata = json.loads(archive.read('metadata.json'))
+        return {
+            'created_at': metadata.get('created_at'), 'hostname': metadata.get('hostname'),
+            'format': metadata.get('format'), 'size': path.stat().st_size,
+            'files': len(names), 'has_wireguard': any(name.startswith('system/etc/wireguard/') for name in names),
+        }
+
+
+def stage_restore(source_name):
+    source = Path('/tmp') / Path(source_name).name
+    if not re.fullmatch(r'itbity-restore-[a-f0-9]{32}\.zip', source.name):
+        raise ValueError('Invalid temporary upload name')
+    details = inspect_archive(source)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for old in UPLOAD_DIR.glob('*.zip'):
+        if old.stat().st_mtime < datetime.now().timestamp() - 86400:
+            old.unlink(missing_ok=True)
+    restore_id = uuid.uuid4().hex
+    destination = UPLOAD_DIR / f'{restore_id}.zip'
+    shutil.move(source, destination)
+    os.chmod(destination, 0o600)
+    emit(True, restore_id=restore_id, backup=details)
+
+
+def restore_archive(restore_id, mode):
+    if not re.fullmatch(r'[a-f0-9]{32}', restore_id) or mode not in {'data', 'full'}:
+        raise ValueError('Invalid restore request')
+    source = UPLOAD_DIR / f'{restore_id}.zip'
+    inspect_archive(source)
+    work = Path(tempfile.mkdtemp(prefix='restore-', dir=BACKUP_DIR))
+    safety = create_archive()
+    safety_path = BACKUP_DIR / f'safety-before-restore-{datetime.now().strftime("%Y%m%d-%H%M%S")}.zip'
+    safety.replace(safety_path)
+    try:
+        with zipfile.ZipFile(source) as archive:
+            archive.extractall(work)
+        env = parse_env()
+        defaults = work / 'restore-db.cnf'
+        defaults.write_text('[client]\n' + f'user={env.get("DB_USER", "itbity")}\npassword={env.get("DB_PASSWORD", "")}\nhost={env.get("DB_HOST", "localhost")}\n')
+        os.chmod(defaults, 0o600)
+        client = shutil.which('mariadb') or shutil.which('mysql')
+        if not client:
+            raise RuntimeError('MariaDB client is not installed')
+        with (work / 'database/database.sql').open('rb') as database:
+            subprocess.run([client, f'--defaults-extra-file={defaults}', env.get('DB_NAME', 'itbitysshpanel')],
+                           stdin=database, stderr=subprocess.PIPE, check=True)
+        for relative, destination in (
+            ('system/etc/itbity-wireguard', Path('/etc/itbity-wireguard')),
+            ('system/etc/wireguard', Path('/etc/wireguard')),
+        ):
+            restored = work / relative
+            if restored.exists():
+                destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+                shutil.copytree(restored, destination, dirs_exist_ok=True)
+                os.chmod(destination, 0o700)
+                for secured in destination.rglob('*'):
+                    if not secured.is_symlink():
+                        os.chmod(secured, 0o700 if secured.is_dir() else 0o600)
+        if mode == 'full' and (work / 'panel').exists():
+            shutil.copytree(work / 'panel', PROJECT_DIR, dirs_exist_ok=True)
+            account = pwd.getpwnam('www-data')
+            for path in PROJECT_DIR.rglob('*'):
+                if not path.is_symlink():
+                    os.chown(path, account.pw_uid, account.pw_gid)
+        source.unlink(missing_ok=True)
+        subprocess.run(['/usr/bin/systemctl', 'try-restart', 'wg-quick@wg0.service'], check=False)
+        subprocess.run(['/usr/bin/systemctl', 'restart', '--no-block', 'itbity-ssh-panel.service'], check=False)
+        emit(True, message='Backup restored successfully', safety_backup=str(safety_path), mode=mode)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def create_archive():
     BACKUP_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     work = Path(tempfile.mkdtemp(prefix='work-', dir=BACKUP_DIR))
@@ -230,10 +317,22 @@ def main():
     elif command == 'trigger':
         subprocess.run(['/usr/bin/systemctl', 'start', '--no-block', 'itbity-backup.service'], check=True)
         emit(True, message='Full backup started in background')
+    elif command == 'stage' and len(sys.argv) == 3:
+        stage_restore(sys.argv[2])
+    elif command == 'restore' and len(sys.argv) == 4:
+        restore_archive(sys.argv[2], sys.argv[3])
+    elif command == 'restore-trigger' and len(sys.argv) == 4:
+        restore_id, mode = sys.argv[2], sys.argv[3]
+        if not re.fullmatch(r'[a-f0-9]{32}', restore_id) or mode not in {'data', 'full'}:
+            raise ValueError('Invalid restore request')
+        subprocess.run(['/usr/bin/systemd-run', '--unit', f'itbity-restore-{restore_id[:8]}',
+                        '--collect', '/usr/local/sbin/itbity-backup', 'restore', restore_id, mode],
+                       check=True, capture_output=True)
+        emit(True, message='Restore started in background', restore_id=restore_id, mode=mode)
     elif command == 'run':
         run_backup()
     else:
-        raise ValueError('Usage: itbity-backup status|configure SCHEDULE CHAT_ID (token on stdin)|test|trigger|run')
+        raise ValueError('Usage: itbity-backup status|configure SCHEDULE CHAT_ID|test|trigger|run|stage FILE|restore ID MODE|restore-trigger ID MODE')
 
 
 if __name__ == '__main__':
