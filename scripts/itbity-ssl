@@ -7,6 +7,8 @@ import shutil
 import socket
 import subprocess
 import sys
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 STATE_DIR = Path('/etc/itbity-ssl')
@@ -32,12 +34,33 @@ def server_ip():
         probe.close()
 
 def resolved_ipv4(domain):
-    return sorted({item[4][0] for item in socket.getaddrinfo(domain, 443, socket.AF_INET, socket.SOCK_STREAM)})
+    addresses = set()
+    try:
+        addresses.update(item[4][0] for item in socket.getaddrinfo(domain, 443, socket.AF_INET, socket.SOCK_STREAM))
+    except socket.gaierror:
+        pass
+    if not addresses:
+        query = urllib.parse.urlencode({'name': domain, 'type': 'A'})
+        request = urllib.request.Request(
+            f'https://dns.google/resolve?{query}',
+            headers={'Accept': 'application/dns-json', 'User-Agent': 'IT-Bity-Panel/1.0'},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode())
+        for answer in payload.get('Answer', []):
+            if answer.get('type') == 1:
+                try:
+                    addresses.add(str(ipaddress.ip_address(answer.get('data', ''))))
+                except ValueError:
+                    pass
+    return sorted(addresses)
 
 def check(domain):
     domain = valid_domain(domain)
     host_ip = server_ip()
     addresses = resolved_ipv4(domain)
+    if not addresses:
+        raise ValueError('No IPv4 (A) record was found for this domain')
     return {'domain': domain, 'server_ip': host_ip, 'resolved_ips': addresses, 'matches': host_ip in addresses}
 
 def status():
