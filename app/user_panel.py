@@ -6,7 +6,7 @@ from flask import Blueprint, Response, abort, flash, jsonify, redirect, render_t
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
-from app.models import AppSetting, RecommendedApp, SupportTicket, User, UserIPSession
+from app.models import AppSetting, RecommendedApp, SupportTicket, User, UserIPSession, ensure_default_recommended_apps
 from app.user_mgmt.linux import reset_linux_password
 from app.user_mgmt.services.telemetry.connections import get_conns
 from app.user_mgmt.services.wireguard import get_client_config
@@ -70,6 +70,7 @@ def logout():
 @user_panel_bp.route('/')
 @user_required
 def dashboard():
+    ensure_default_recommended_apps()
     limits = current_user.limits
     now = datetime.utcnow()
     days_remaining = None

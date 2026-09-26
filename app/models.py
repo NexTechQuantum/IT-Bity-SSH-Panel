@@ -191,3 +191,21 @@ class RecommendedApp(db.Model):
     icon = db.Column(db.String(60), default='fa-download', nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     sort_order = db.Column(db.Integer, default=0, nullable=False)
+
+DEFAULT_RECOMMENDED_APPS = (
+    ('WireGuard', 'Android', 'https://www.wireguard.com/install/', 'fa-shield-halved', 10),
+    ('HTTP Injector', 'Android', 'https://play.google.com/store/apps/details?id=com.evozi.injector', 'fa-mobile-screen-button', 11),
+    ('WireGuard', 'iPhone', 'https://www.wireguard.com/install/', 'fa-shield-halved', 20),
+    ('Termius', 'iPhone', 'https://termius.com/download/ios', 'fa-terminal', 21),
+    ('WireGuard', 'Windows', 'https://www.wireguard.com/install/', 'fa-shield-halved', 30),
+    ('Bitvise SSH Client', 'Windows', 'https://bitvise.com/ssh-client-download', 'fa-terminal', 31),
+    ('WireGuard', 'Linux', 'https://www.wireguard.com/install/', 'fa-shield-halved', 40),
+    ('Termius', 'Linux', 'https://termius.com/download/linux', 'fa-terminal', 41),
+)
+
+def ensure_default_recommended_apps():
+    if RecommendedApp.query.first() is not None:
+        return
+    for name, platform, url, icon, order in DEFAULT_RECOMMENDED_APPS:
+        db.session.add(RecommendedApp(name=name, platform=platform, download_url=url, icon=icon, sort_order=order))
+    db.session.commit()

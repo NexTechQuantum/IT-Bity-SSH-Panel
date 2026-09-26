@@ -7,7 +7,7 @@ import os
 import subprocess
 import uuid
 from app import db
-from app.models import AppSetting, RecommendedApp
+from app.models import AppSetting, RecommendedApp, ensure_default_recommended_apps
 
 settings_bp = Blueprint('settings', __name__)
 
@@ -208,6 +208,7 @@ def toggle_user_panel():
 @admin_required
 def user_panel_apps():
     if request.method == 'GET':
+        ensure_default_recommended_apps()
         apps = RecommendedApp.query.order_by(RecommendedApp.sort_order, RecommendedApp.name).all()
         return jsonify({'success': True, 'apps': [
             {'id': app.id, 'name': app.name, 'platform': app.platform,
@@ -218,7 +219,9 @@ def user_panel_apps():
     name = str(payload.get('name', '')).strip()
     platform = str(payload.get('platform', '')).strip()
     download_url = str(payload.get('download_url', '')).strip()
-    if not name or not platform or not download_url.startswith(('https://', 'http://')):
+    if platform not in {'Android', 'iPhone', 'Windows', 'Linux'}:
+        return jsonify({'success': False, 'message': 'Choose a supported operating system'}), 400
+    if not name or not download_url.startswith(('https://', 'http://')):
         return jsonify({'success': False, 'message': 'Enter a name, platform and valid download URL'}), 400
     app = RecommendedApp(name=name[:100], platform=platform[:40], download_url=download_url[:500])
     db.session.add(app)

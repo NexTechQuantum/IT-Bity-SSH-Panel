@@ -5,7 +5,7 @@
     <title>My Panel — IT Bity</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/variables.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/user_panel.css', v='20260926-user-panel-v1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/user_panel.css', v='20260926-app-catalog-v1') }}">
 </head>
 <body class="portal-page">
 <div class="portal-layout">
@@ -63,7 +63,7 @@
 
         <div class="portal-grid lower-grid">
             <section id="apps" class="portal-card"><div class="portal-card-head"><div><span class="portal-eyebrow">DOWNLOAD</span><h3>Recommended apps</h3></div></div>
-                <div class="app-list">{% for app in recommended_apps %}<a href="{{ app.download_url }}" target="_blank" rel="noopener"><span><i class="fas {{ app.icon }}"></i></span><div><strong>{{ app.name }}</strong><small>{{ app.platform }}</small></div><i class="fas fa-arrow-up-right-from-square"></i></a>{% else %}<div class="portal-empty compact">Your administrator has not added any apps yet.</div>{% endfor %}</div>
+                <div class="app-platforms">{% for platform, platform_icon in [('Android','fa-android'),('iPhone','fa-apple'),('Windows','fa-windows'),('Linux','fa-linux')] %}{% set items = recommended_apps|selectattr('platform','equalto',platform)|list %}{% if items %}<section><h4><i class="fab {{ platform_icon }}"></i> {{ platform }}</h4><div class="app-list">{% for app in items %}<a href="{{ app.download_url }}" target="_blank" rel="noopener"><span><i class="fas {{ app.icon }}"></i></span><div><strong>{{ app.name }}</strong><small>Open download page</small></div><i class="fas fa-arrow-up-right-from-square"></i></a>{% endfor %}</div></section>{% endif %}{% endfor %}</div>
             </section>
             <section id="support" class="portal-card"><div class="portal-card-head"><div><span class="portal-eyebrow">NEED HELP?</span><h3>Support</h3></div></div>
                 <p class="card-copy">Tell us what happened and your administrator can follow up.</p><button class="portal-primary-button" onclick="openTicket()"><i class="fas fa-paper-plane"></i> New ticket</button>

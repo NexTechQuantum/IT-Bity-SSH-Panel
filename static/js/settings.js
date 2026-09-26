@@ -116,7 +116,8 @@ async function loadRecommendedApps() {
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.message || 'Unable to load applications');
     const list = document.getElementById('recommendedAppsList');
-    list.innerHTML = data.apps.length ? data.apps.map(app => `<div style="display:flex;align-items:center;gap:8px;padding:9px 11px;background:var(--bg-secondary);border-radius:8px;font-size:12px;"><i class="fas fa-mobile-screen"></i><strong>${escapeSettingHtml(app.name)}</strong><span style="color:var(--text-secondary);flex:1;">${escapeSettingHtml(app.platform)}</span><button type="button" class="btn-action delete" onclick="deleteRecommendedApp(${app.id})"><i class="fas fa-trash"></i></button></div>`).join('') : '<span class="setting-desc">No applications added yet.</span>';
+    const platforms = [{name:'Android',icon:'fa-android'},{name:'iPhone',icon:'fa-apple'},{name:'Windows',icon:'fa-windows'},{name:'Linux',icon:'fa-linux'}];
+    list.innerHTML = platforms.map(platform => { const apps = data.apps.filter(app => app.platform === platform.name); return `<section class="recommended-os"><header><i class="fab ${platform.icon}"></i><strong>${platform.name}</strong><small>${apps.length} app${apps.length === 1 ? '' : 's'}</small></header><div>${apps.length ? apps.map(app => `<article><span><i class="fas ${app.name === 'WireGuard' ? 'fa-shield-halved' : 'fa-terminal'}"></i></span><div><strong>${escapeSettingHtml(app.name)}</strong><a href="${escapeSettingHtml(app.download_url)}" target="_blank" rel="noopener">Download page</a></div><button type="button" class="btn-action delete" onclick="deleteRecommendedApp(${app.id})"><i class="fas fa-trash"></i></button></article>`).join('') : '<em>No application added</em>'}</div></section>`; }).join('');
 }
 
 async function addRecommendedApp() {
